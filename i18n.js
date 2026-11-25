@@ -1,0 +1,50 @@
+'use strict';
+// English and Arabic strings. Add a new language by adding another key here.
+const I18N = {
+  en: {
+    appName: 'MyShop', welcome: 'Welcome to MyShop', welcomeSub: 'A fun shop simulator for kids.',
+    chooseProfile: 'Who is playing?', addProfile: 'New profile', profiles: 'Profiles',
+    parent: 'Parents', parentSetup: 'Parent setup',
+    createPin: 'Create a 4-digit PIN', newPin: 'New PIN', changePin: 'Change PIN',
+    pinHint: 'Parents use this PIN to add or delete profiles.',
+    pinFour: 'The PIN must be 4 digits', enterPin: 'Enter the parent PIN', wrongPin: 'Wrong PIN',
+    save: 'Save', cancel: 'Cancel', delete: 'Delete', edit: 'Edit', back: 'Back', done: 'Done',
+    next: 'Continue', ok: 'OK', saved: 'Saved',
+    name: 'Name', shopName: 'Shop name', nameReq: 'Please enter a name',
+    chooseBuddy: 'Choose your buddy', theme: 'Theme', dark: 'Dark', cream: 'Cream',
+    color: 'Favorite color', currency: 'Currency', language: 'Language', customize: 'Customize',
+    itemName: 'Item name', price: 'Price', quantity: 'Quantity', priceReq: 'Enter a price',
+    takePhoto: 'Take photo', upload: 'Upload', addItem: 'Add item', editItem: 'Edit item',
+    emptyShop: 'Your shelf is empty. Add your first item!',
+    customers: 'Customers', sell: 'Sell', notNow: 'Not now', soldOut: 'Sold out',
+    inStock: 'In stock: {n}', level: 'Lv {n}', bubble: "I'll take the {item}!",
+    sold: 'SOLD', levelUp: 'Level up!', noItems: 'Add some items first',
+    confirmDelete: 'Delete this?', yes: 'Yes, delete', shopOf: "{n}'s shop",
+    rates: 'Exchange rates (1 USD =)', install: 'Install app',
+    iosInstall: 'On iPhone: tap Share, then Add to Home Screen.',
+    maxProfiles: 'Maximum 6 profiles', imgErr: 'Could not read this image'
+  },
+  ar: {
+    appName: 'متجري', welcome: 'مرحباً في متجري', welcomeSub: 'لعبة ممتعة لمحاكاة المتجر للأطفال.',
+    chooseProfile: 'من سيلعب؟', addProfile: 'ملف جديد', profiles: 'الملفات',
+    parent: 'الوالدان', parentSetup: 'إعداد الوالدين',
+    createPin: 'أنشئ رمزاً سرياً من 4 أرقام', newPin: 'رمز جديد', changePin: 'تغيير الرمز',
+    pinHint: 'يستخدم الوالدان هذا الرمز لإضافة الملفات أو حذفها.',
+    pinFour: 'يجب أن يتكون الرمز من 4 أرقام', enterPin: 'أدخل الرمز السري للوالدين', wrongPin: 'الرمز غير صحيح',
+    save: 'حفظ', cancel: 'إلغاء', delete: 'حذف', edit: 'تعديل', back: 'رجوع', done: 'تم',
+    next: 'متابعة', ok: 'حسناً', saved: 'تم الحفظ',
+    name: 'الاسم', shopName: 'اسم المتجر', nameReq: 'من فضلك أدخل اسماً',
+    chooseBuddy: 'اختر رفيقك', theme: 'المظهر', dark: 'داكن', cream: 'كريمي',
+    color: 'اللون المفضل', currency: 'العملة', language: 'اللغة', customize: 'تخصيص',
+    itemName: 'اسم المنتج', price: 'السعر', quantity: 'الكمية', priceReq: 'أدخل السعر',
+    takePhoto: 'التقاط صورة', upload: 'رفع صورة', addItem: 'إضافة منتج', editItem: 'تعديل المنتج',
+    emptyShop: 'رفّك فارغ. أضف أول منتج!',
+    customers: 'الزبائن', sell: 'بيع', notNow: 'ليس الآن', soldOut: 'نفد',
+    inStock: 'المتوفر: {n}', level: 'المستوى {n}', bubble: 'سآخذ {item}!',
+    sold: 'تم البيع', levelUp: 'مستوى جديد!', noItems: 'أضف منتجات أولاً',
+    confirmDelete: 'هل تريد الحذف؟', yes: 'نعم، احذف', shopOf: 'متجر {n}',
+    rates: 'أسعار الصرف (1 دولار =)', install: 'تثبيت التطبيق',
+    iosInstall: 'على آيفون: اضغط مشاركة ثم إضافة إلى الشاشة الرئيسية.',
+    maxProfiles: 'الحد الأقصى 6 ملفات', imgErr: 'تعذّرت قراءة الصورة'
+  }
+};
