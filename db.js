@@ -5,13 +5,15 @@ let _db = null;
 function dbOpen() {
   if (_db) return _db;
   _db = new Promise((resolve, reject) => {
-    const r = indexedDB.open('myshop', 1);
+    const r = indexedDB.open('myshop', 2);
     r.onupgradeneeded = () => {
       const d = r.result;
-      d.createObjectStore('profiles', { keyPath: 'id' });
-      const p = d.createObjectStore('products', { keyPath: 'id' });
-      p.createIndex('pid', 'pid');
-      d.createObjectStore('meta', { keyPath: 'k' });
+      const has = n => d.objectStoreNames.contains(n);
+      if (!has('profiles')) d.createObjectStore('profiles', { keyPath: 'id' });
+      if (!has('products')) d.createObjectStore('products', { keyPath: 'id' }).createIndex('pid', 'pid');
+      if (!has('meta')) d.createObjectStore('meta', { keyPath: 'k' });
+      if (!has('customers')) d.createObjectStore('customers', { keyPath: 'id' }).createIndex('pid', 'pid');
+      if (!has('orders')) d.createObjectStore('orders', { keyPath: 'id' }).createIndex('pid', 'pid');
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
@@ -35,7 +37,9 @@ const DB = {
   get: (s, k) => dbTx(s, 'readonly', o => o.get(k)),
   put: (s, v) => dbTx(s, 'readwrite', o => o.put(v)),
   del: (s, k) => dbTx(s, 'readwrite', o => o.delete(k)),
-  byPid: pid => dbTx('products', 'readonly', o => o.index('pid').getAll(pid))
+  clear: s => dbTx(s, 'readwrite', o => o.clear()),
+  byPid: (s, pid) => dbTx(s, 'readonly', o => o.index('pid').getAll(pid)),
+  putMany: (s, arr) => dbTx(s, 'readwrite', o => { arr.forEach(v => o.put(v)); return null; })
 };
 
 const getMeta = async (k, def) => {
