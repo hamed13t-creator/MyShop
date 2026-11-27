@@ -1,5 +1,5 @@
 // Bump VERSION each time you update the app so phones fetch the new files.
-const VERSION = 'myshop-v2';
+const VERSION = 'myshop-v4';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'db.js', 'i18n.js', 'sfx.js', 'mascots.js', 'data.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',
@@ -7,7 +7,7 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(VERSION).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION).then(c => Promise.all(ASSETS.map(a => c.add(new Request(a, { cache: 'reload' }))))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {

@@ -13,7 +13,7 @@ const ST = ['ordered', 'packed', 'shipped', 'delivered'];
 const ST_ICON = { ordered: 'cart', packed: 'box', shipped: 'truck', delivered: 'check' };
 
 // Shop themes unlock with the shop level.
-const SKINS = [['default', 1], ['candy', 3], ['space', 5], ['jungle', 8]];
+const SKINS = [['default', 1, '🏪'], ['ocean', 2, '🌊'], ['candy', 3, '🍭'], ['winter', 4, '❄️'], ['space', 5, '🚀'], ['pirate', 6, '🏴‍☠️'], ['arcade', 7, '🕹️'], ['jungle', 8, '🌴'], ['souk', 9, '🏮'], ['sunset', 10, '🌅']];
 
 const SLOTS = ['sign', 'poster', 'counter', 'pet', 'plant'];
 const DECOR = [
@@ -24,7 +24,7 @@ const DECOR = [
   { id: 'plant_pot', slot: 'plant', e: '🪴', p: 10 }, { id: 'plant_cactus', slot: 'plant', e: '🌵', p: 8 }, { id: 'plant_sun', slot: 'plant', e: '🌻', p: 9 }
 ];
 
-// Daily missions: type = the event that advances it, goal = how many, r = reward in USD.
+// Daily missions: type = the event that advances it, goal = how many, r = reward in USD (converted to a nice local amount).
 const MISSIONS = [
   { id: 'sell3', type: 'items', goal: 3, r: 5 },
   { id: 'add1', type: 'add', goal: 1, r: 3 },
@@ -32,7 +32,8 @@ const MISSIONS = [
   { id: 'serve2', type: 'order', goal: 2, r: 4 },
   { id: 'star5', type: 'five', goal: 1, r: 5 },
   { id: 'change1', type: 'math', goal: 1, r: 4 },
-  { id: 'cart3', type: 'big', goal: 1, r: 6 }
+  { id: 'cart3', type: 'big', goal: 1, r: 6 },
+  { id: 'math3', type: 'math', goal: 3, r: 7 }
 ];
 
 // Achievements. p.st holds lifetime counters.

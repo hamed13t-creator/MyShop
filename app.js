@@ -1,17 +1,20 @@
 'use strict';
-/* MyShop v2 - main app. Views are functions returning HTML; clicks are handled with data-act. */
+/* MyShop v3 - main app. Views are functions returning HTML; clicks are handled with data-act. */
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const round2 = v => Math.round(v * 100) / 100;
+/* kids may type Arabic-Indic digits and Arabic separators: turn them into normal numbers */
+const normDigits = s => String(s == null ? '' : s).replace(/[\u0660-\u0669]/g, c => c.charCodeAt(0) - 0x660).replace(/[\u06F0-\u06F9]/g, c => c.charCodeAt(0) - 0x6F0).replace(/[\u066B\u060C,]/g, '.').replace(/[\u066C\s]/g, '');
+const parseNum = s => parseFloat(normDigits(s));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'SAR', 'AED', 'DZD', 'EGP', 'MAD', 'TND', 'CAD', 'TRY'];
 const RATES0 = { USD: 1, EUR: 0.92, GBP: 0.79, SAR: 3.75, AED: 3.67, DZD: 135, EGP: 49, MAD: 10, TND: 3.1, CAD: 1.37, TRY: 34 };
 const ACCENTS = ['#14B8A6', '#7C3AED', '#EC4899', '#3B82F6', '#F97316', '#22C55E'];
 const XPL = 100, MAX_PROFILES = 6, MAX_CUST = 12, RESTOCK_N = 5;
-const PBASE = { generous: 50, regular: 30, picky: 20 }, PMULT = { generous: 8, regular: 5, picky: 3 };
+const PMULT = { generous: 6, regular: 4, picky: 3 };   // hidden daily budget = this many average items (varies by day)
 
 const S = {
   lang: 'en', theme: 'dark', sound: true, pin: null, rates: Object.assign({}, RATES0),
@@ -68,7 +71,13 @@ function applyLang() {
   document.documentElement.dir = S.lang === 'ar' ? 'rtl' : 'ltr';
   document.title = t('appName');
 }
+function applySkin() {          // shop theme: wallpaper tile behind every screen of the profile
+  const p = S.cur, h = document.documentElement.dataset;
+  h.skin = p ? p.skin : 'default';
+  h.wall = p && p.skin !== 'default' && p.wall !== false ? 'on' : 'off';
+}
 function applyTheme(theme, accent) {
+  applySkin();
   document.documentElement.dataset.theme = theme;
   document.documentElement.style.setProperty('--accent', accent || ACCENTS[0]);
   const m = document.querySelector('meta[name=theme-color]');
@@ -76,8 +85,16 @@ function applyTheme(theme, accent) {
 }
 const curCode = () => (S.cur && S.cur.currency) || 'USD';
 const rateOf = c => S.rates[c] || 1;
-const rnd = (v, cur) => rateOf(cur || curCode()) >= 20 ? Math.round(v) : Math.round(v * 100) / 100;
-const loc = (usd, cur) => rnd(usd * rateOf(cur || curCode()), cur);
+/* All money is stored in the shop's own currency, rounded to its decimals (no hidden USD base, so no drift). */
+const rnd = (v, cur) => rateOf(cur || curCode()) >= 20 ? Math.round(v) : Math.round((v + 1e-9) * 100) / 100;
+const minUnit = cur => rateOf(cur || curCode()) >= 20 ? 1 : 0.01;
+const conv = (v, from, to) => from === to ? v : rnd(v / rateOf(from) * rateOf(to), to);
+function nice(v) {                      // friendly round amount for game prices (rewards, decor, budgets)
+  const step = v < 10 ? 0.5 : v < 100 ? 1 : v < 1000 ? 5 : 10;
+  return Math.max(minUnit(), rnd(Math.round(v / step) * step));
+}
+const lp = usd => nice(usd * rateOf(curCode()));   // a USD catalog price, as a nice local amount
+const inCur = (v, from) => conv(v, from || curCode(), curCode());
 function fmt(n, cur) {
   cur = cur || curCode();
   const l = S.lang === 'ar' ? 'ar-DZ' : 'en-US';
@@ -85,7 +102,7 @@ function fmt(n, cur) {
     return new Intl.NumberFormat(l, { style: 'currency', currency: cur, minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 }).format(n);
   } catch (e) { return n + ' ' + cur; }
 }
-const money = (usd, cur) => fmt(loc(usd, cur), cur || curCode());
+const money = (v, cur) => fmt(v, cur || curCode());
 const hue = id => Array.from(String(id)).reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
 const level = p => Math.floor(p.xp / XPL) + 1;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -94,7 +111,7 @@ const dkey = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1
 const addDays = (k, n) => { const d = new Date(k + 'T12:00:00'); d.setDate(d.getDate() + n); return dkey(d); };
 const dlabel = (k, o) => new Date(k + 'T12:00:00').toLocaleDateString(S.lang === 'ar' ? 'ar' : 'en', o || { weekday: 'short', month: 'short', day: 'numeric' });
 const catEmoji = c => (CATS.find(x => x[0] === c) || CATS[CATS.length - 1])[1];
-const unitLocal = x => loc(x.usd * (1 - (x.disc || 0) / 100));
+const unitLocal = x => rnd(x.pr * (1 - (x.disc || 0) / 100));
 const imgOrPh = (x, s) => x.img ? '<img src="' + x.img + '" alt="">' : '<div class="ph" style="--h:' + hue(x.id) + '">' + ic('box', s || 34) + '</div>';
 const stars = n => '<span class="stars">' + '★'.repeat(n) + '<i>' + '★'.repeat(5 - n) + '</i></span>';
 
@@ -121,7 +138,7 @@ function sheet(html) {
   o.addEventListener('click', e => { if (e.target === o) closeSheet(); });
   document.body.appendChild(o);
 }
-function closeSheet() { const o = $('#ov'); if (o) o.remove(); }
+function closeSheet() { S.cartOpen = false; const o = $('#ov'); if (o) o.remove(); }
 function confirmBox(titleKey, yesKey, cb, extra, red) {
   S.cb = cb;
   sheet('<h2>' + t(titleKey) + '</h2>' + (extra ? '<p>' + extra + '</p>' : '') + '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('stay') + '</button><button class="btn ' + (red ? 'red' : '') + '" data-act="confirmYes">' + t(yesKey) + '</button></div>');
@@ -137,9 +154,10 @@ function normProfile(p) {
   if (p.cash == null) p.cash = p.coins != null ? p.coins : 20;
   delete p.coins;
   p.open = p.open !== false;
+  p.mathLvl = p.mathLvl || 'easy';
   p.owned = p.owned || []; p.eq = p.eq || {}; p.skin = p.skin || 'default';
   p.coupons = p.coupons || []; p.badges = p.badges || []; p.seq = p.seq || 0; p.xp = p.xp || 0;
-  p.st = Object.assign({ rev: 0, sold: 0, orders: 0, delivered: 0, five: 0, math: 0, custs: 0, restock: 0, decor: 0, rsum: 0, rcount: 0 }, p.st || {});
+  p.st = Object.assign({ rev: 0, sold: 0, orders: 0, delivered: 0, five: 0, math: 0, custs: 0, restock: 0, decor: 0, rsum: 0, rcount: 0, mq: 0 }, p.st || {});
   return p;
 }
 const saveP = () => DB.put('profiles', S.cur);
@@ -180,24 +198,56 @@ function checkBadges() {
     }
   }
 }
-const avgUsd = () => S.products.length ? S.products.reduce((s, x) => s + x.usd, 0) / S.products.length : 5;
-const walletTarget = c => round2(Math.max(PBASE[c.pers] || 30, (PMULT[c.pers] || 5) * avgUsd()));
+/* Customers have a hidden daily budget (never shown as a number). It is limited, differs each day, and refills tomorrow. */
+const avgPrice = () => S.products.length ? S.products.reduce((a, x) => a + unitLocal(x), 0) / S.products.length : lp(5);
+function dayRand(c, day) { let h = 7; for (const ch of c.id + day) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return (h % 1000) / 1000; }
+function budgetFor(c, day) {
+  const base = (PMULT[c.pers] || 4) * avgPrice();          // about 3-6 average items, +/- a daily random mood
+  return nice(Math.max(base * (0.55 + dayRand(c, day) * 0.9), 2 * (minPrice() || lp(1))));
+}
+const minPrice = () => { const a = S.products.filter(x => x.qty > 0).map(unitLocal); return a.length ? Math.min(...a) : 0; };
+const canShop = c => c.budget >= minPrice() && minPrice() > 0;
+function mood(c) {
+  const full = c.bmax || c.budget || 1, r = c.budget / full;
+  return !canShop(c) ? '😴' : r > 0.6 ? '😄' : r > 0.3 ? '🙂' : '😬';
+}
+async function rebudget() {      // the catalog changed: customers who have not spent anything today get a budget that fits it
+  for (const c of S.customers) if (c.budget === c.bmax) c.day = '';
+  await refill();
+}
 async function refill() {
   const today = dkey();
   for (const c of S.customers) {
-    if (c.day !== today) { c.wallet = walletTarget(c); c.day = today; await DB.put('customers', c); }
+    if (c.day !== today || c.budget == null) { c.budget = budgetFor(c, today); c.bmax = c.budget; c.day = today; delete c.wallet; await DB.put('customers', c); }
   }
 }
 async function seedCustomers(pid) {
   const names = NAMES[S.lang].slice().sort(() => Math.random() - 0.5), ms = MASCOTS.slice().sort(() => Math.random() - 0.5);
-  const list = [['generous', 0], ['regular', 1]].map(([pers, i]) => ({ id: uid(), pid, name: names[i], mascot: ms[i], hat: i ? '' : '🎀', color: BGS[i + 1], pers, wallet: 0, day: '', orders: 0, spent: 0, created: Date.now() + i }));
+  const list = [['generous', 0], ['regular', 1]].map(([pers, i]) => ({ id: uid(), pid, name: names[i], mascot: ms[i], hat: i ? '' : '🎀', color: BGS[i + 1], pers, budget: null, day: '', orders: 0, spent: 0, created: Date.now() + i }));
   await DB.putMany('customers', list);
+}
+/* v2 stored everything in a USD base; v3 keeps money in the shop currency. Runs once per profile. */
+async function migrateMoney(p) {
+  if (p.m3) return;
+  const cur = p.currency, r = rateOf(cur);
+  for (const x of S.products) {
+    x.pr = x.cur === cur ? rnd(x.price, cur) : rnd(x.usd * r, cur);
+    if (!(x.pr > 0)) x.pr = minUnit(cur);
+    await DB.put('products', x);
+  }
+  p.cash = rnd(p.cash * r, cur); p.st.rev = rnd(p.st.rev * r, cur);
+  for (const o of S.orders) {
+    if (o.tip && !o.tipc) { o.tip = rnd(o.tip * rateOf(o.cur), o.cur); o.tipc = 1; await DB.put('orders', o); }
+  }
+  for (const c of S.customers) { c.day = ''; c.budget = null; delete c.wallet; if (c.spent) c.spent = rnd(c.spent * r, cur); await DB.put('customers', c); }
+  p.m3 = true; await saveP();
 }
 async function loadProfileData(id) {
   S.cur = S.profiles.find(p => p.id === id);
   S.products = (await DB.byPid('products', id)).sort((a, b) => a.created - b.created);
   S.customers = (await DB.byPid('customers', id)).sort((a, b) => a.created - b.created);
   S.orders = (await DB.byPid('orders', id)).sort((a, b) => a.ts - b.ts);
+  await migrateMoney(S.cur);
   if (!S.cur.seeded) {   // profiles made before customers existed (v1) get starter customers once
     if (!S.customers.length) { await seedCustomers(id); S.customers = (await DB.byPid('customers', id)).sort((a, b) => a.created - b.created); }
     S.cur.seeded = true; await saveP();
@@ -250,7 +300,7 @@ function pformView() {
 /* ----- the seller's shop ----- */
 function priceTag(x) {
   const d = x.disc || 0;
-  return (d ? '<s class="old">' + fmt(loc(x.usd)) + '</s>' : '') + '<span class="tag">' + fmt(unitLocal(x)) + '</span>';
+  return (d ? '<s class="old">' + fmt(x.pr) + '</s>' : '') + '<span class="tag">' + fmt(unitLocal(x)) + '</span>';
 }
 function productCard(x) {
   const out = x.qty < 1, d = x.disc || 0;
@@ -260,9 +310,10 @@ function productCard(x) {
     '</div><div class="pname">' + catEmoji(x.cat) + ' ' + esc(x.name) + '</div><div class="prices">' + priceTag(x) + '</div></button>';
 }
 
+const restockCost = x => Math.max(minUnit(), rnd(x.pr * 0.5 * RESTOCK_N));   // wholesale: half price
 function sceneHtml(p) {
   const signEq = p.eq.sign, items = SLOTS.filter(s => s !== 'sign' && p.eq[s]).map(s => (DECOR.find(d => d.id === p.eq[s]) || {}).e).filter(Boolean);
-  return '<div class="shopwrap" data-skin="' + p.skin + '"><div class="awning"></div><div class="scene"><h1 class="shoptitle ' + (signEq || '') + '">' + esc(p.shopName) + '</h1>' +
+  return '<div class="shopwrap" data-skin="' + p.skin + '"' + (p.awn ? ' style="--a1:' + p.awn + '"' : '') + '><div class="awning"></div><div class="scene"><h1 class="shoptitle ' + (signEq || '') + '">' + esc(p.shopName) + '</h1>' +
     '<div class="decor">' + (items.length ? items.map((e, i) => '<span class="dec d' + (i % 3) + '">' + e + '</span>').join('') : '<span class="muted small">' + t('decorHint') + '</span>') + '</div></div></div>';
 }
 
@@ -271,7 +322,7 @@ function shopView() {
   const rating = p.st.rcount ? (p.st.rsum / p.st.rcount).toFixed(1) : '–';
   const todo = S.orders.filter(o => o.status !== 'delivered').length;
   const tool = (act, icn, label, badge) => '<button class="tool" data-act="' + act + '">' + ic(icn, 24) + '<span>' + label + '</span>' + (badge ? '<i class="nb">' + badge + '</i>' : '') + '</button>';
-  return '<header class="top"><button class="ibtn" data-act="home" aria-label="' + t('back') + '">' + back() + '</button>' +
+  return '<header class="top"><button class="ibtn" data-act="back" aria-label="' + t('back') + '">' + back() + '</button>' +
     '<div class="me">' + mas(p.mascot, 34) + '<b>' + esc(p.name) + '</b></div>' +
     '<div class="row"><button class="ibtn" data-act="sound" aria-label="' + t('sound') + '">' + ic(S.sound ? 'volume' : 'mute') + '</button>' +
     '<button class="ibtn" data-act="customize" aria-label="' + t('customize') + '">' + ic('sliders') + '</button></div></header>' +
@@ -292,7 +343,7 @@ function itemView() {
     '<div class="row two"><label class="btn" style="margin:0;color:#fff;font-size:16px"><input type="file" id="fcam" accept="image/*" capture="environment" hidden>' + ic('camera') + ' ' + t('takePhoto') + '</label>' +
     '<label class="btn blue" style="margin:0;color:#fff;font-size:16px"><input type="file" id="fup" accept="image/*" hidden>' + ic('upload') + ' ' + t('upload') + '</label></div>' +
     '<label>' + t('itemName') + '<input id="i_name" class="inp" maxlength="40" value="' + esc(d.name) + '"></label>' +
-    '<div class="row two"><label>' + t('price') + '<input id="i_price" class="inp" inputmode="decimal" value="' + esc(d.price == null ? '' : d.price) + '"></label>' +
+    '<div class="row two"><label>' + t('price') + '<input id="i_price" class="inp" inputmode="decimal" autocomplete="off" value="' + esc(d.price == null ? '' : d.price) + '"></label>' +
     '<label>' + t('currency') + '<select id="i_cur" class="inp">' + CURRENCIES.map(c => '<option ' + (cur === c ? 'selected' : '') + '>' + c + '</option>').join('') + '</select></label></div>' +
     '<label>' + t('category') + '</label><div class="chips wrap">' + CATS.map(c => '<button class="chip ' + (d.cat === c[0] ? 'sel' : '') + '" data-act="pickCat" data-v="' + c[0] + '">' + c[1] + ' ' + t('cat_' + c[0]) + '</button>').join('') + '</div>' +
     '<label>' + t('discount') + '</label><div class="seg wrap">' + DISCS.map(n => '<button class="' + (d.disc === n ? 'sel' : '') + '" data-act="pickDisc" data-v="' + n + '">' + (n ? '-' + n + '%' : t('none')) + '</button>').join('') + '</div>' +
@@ -303,7 +354,7 @@ function itemView() {
 
 /* ----- customers ----- */
 function custsView() {
-  const cards = S.customers.map(c => '<div class="ccard"><button class="pcard" data-act="shopAs" data-id="' + c.id + '">' + avatar(c.mascot, 72, c.hat, c.color) + '<b>' + esc(c.name) + '</b><span class="pill gold">' + ic('coin', 14) + ' ' + money(c.wallet) + '</span><small>' + t('pers_' + c.pers) + '</small></button>' +
+  const cards = S.customers.map(c => '<div class="ccard"><button class="pcard" data-act="shopAs" data-id="' + c.id + '">' + avatar(c.mascot, 72, c.hat, c.color) + '<b>' + esc(c.name) + '</b><span class="pill mood">' + mood(c) + ' ' + t(canShop(c) ? 'moodOk' : 'moodNo') + '</span><small>' + t('pers_' + c.pers) + '</small></button>' +
     '<button class="ibtn ed" data-act="editCust" data-id="' + c.id + '" aria-label="' + t('edit') + '">' + ic('edit', 16) + '</button></div>').join('');
   return head(t('customers'), null, 'toShop') + '<p class="muted small" style="margin-top:0">' + t('custHint') + '</p><div class="cgrid">' + cards +
     '<button class="pcard add" data-act="newCust">' + ic('plus', 34) + '<b>' + t('newCustomer') + '</b></button></div>';
@@ -346,17 +397,27 @@ function storeView() {
   const c = S.shopper, p = S.cur, T = cartTotals();
   return '<header class="top"><button class="ibtn" data-act="back" aria-label="' + t('back') + '">' + back() + '</button>' +
     '<div class="me">' + avatar(c.mascot, 36, c.hat, c.color) + '<b>' + esc(c.name) + '</b></div>' +
-    '<div class="row"><span class="pill gold" id="wallet">' + ic('coin', 15) + ' ' + money(c.wallet) + '</span><button class="ibtn" id="cbtn" data-act="cart" aria-label="' + t('yourCart') + '">' + ic('cart') + cartBadge(T.count) + '</button></div></header>' +
+    '<div class="row"><span class="pill mood" id="wallet">' + mood(c) + '</span><button class="ibtn" id="cbtn" data-act="cart" aria-label="' + t('yourCart') + '">' + ic('cart') + cartBadge(T.count) + '</button></div></header>' +
     '<h1 class="shoptitle" style="margin-top:0">' + esc(p.shopName) + '</h1>' +
     '<div class="search">' + ic('search', 18) + '<input id="q" class="inp" placeholder="' + t('search') + '" value="' + esc(S.q) + '"></div>' +
     '<div class="chips"><button class="chip ' + (S.cat === 'all' ? 'sel' : '') + '" data-act="setCat" data-v="all">' + t('all') + '</button><button class="chip ' + (S.cat === 'fav' ? 'sel' : '') + '" data-act="setCat" data-v="fav">♥ ' + t('favorites') + '</button>' +
     CATS.map(x => '<button class="chip ' + (S.cat === x[0] ? 'sel' : '') + '" data-act="setCat" data-v="' + x[0] + '">' + x[1] + ' ' + t('cat_' + x[0]) + '</button>').join('') + '</div>' +
-    '<div class="shelf" id="grid">' + storeGrid() + '</div>' + cartBar();
+    '<div class="storecols"><div class="shelf" id="grid">' + storeGrid() + '</div><aside id="cartpane">' + (isWide() ? cartHtml() : '') + '</aside></div>' + cartBar();
+}
+const isWide = () => window.matchMedia && matchMedia('(min-width:1000px)').matches;
+const paneOn = () => !!$('#cartpane') && isWide();
+let wasWide = isWide();
+window.addEventListener('resize', () => { const w = isWide(); if (w !== wasWide) { wasWide = w; if (S.view === 'store' && !$('#ov')) render(); else if (S.view === 'store') { closeSheet(); render(); } } });
+function refreshCart() {                      // the cart lives in the side panel on wide screens, in a sheet otherwise
+  const a = $('#cartpane');
+  if (a) a.innerHTML = isWide() ? cartHtml() : '';
+  if (!paneOn() && $('#ov') && S.cartOpen) sheet(cartHtml());
 }
 function updateStore() {
   const g = $('#grid'), cb = $('#cartbar'), nb = $('#nb'), T = cartTotals();
   if (g) g.innerHTML = storeGrid();
   if (cb) cb.outerHTML = cartBar();
+  const pa = $('#cartpane'); if (pa && isWide()) pa.innerHTML = cartHtml();
   if (nb) { nb.textContent = T.count; nb.style.display = T.count ? 'flex' : 'none'; }
 }
 
@@ -371,38 +432,46 @@ function cartTotals() {
   return { ls, sub, disc, pct, total: rnd(sub - disc, cur), count: ls.reduce((s, l) => s + l.qty, 0) };
 }
 function cartHtml() {
-  const T = cartTotals(), c = S.shopper;
+  const T = cartTotals();
   if (!T.ls.length) return '<h2>' + t('yourCart') + '</h2><div class="empty">' + ic('cart', 44) + '<p>' + t('cartEmpty') + '</p></div><button class="btn big" data-act="closeSheet">' + t('keepShopping') + '</button>';
-  const short = T.total > loc(c.wallet);
+  const mathOn = S.cur.mathLvl !== 'off';
   return '<h2>' + t('yourCart') + '</h2>' + T.ls.map(l => '<div class="line"><div class="thumb">' + imgOrPh(l.x, 20) + '</div><div class="lt"><b>' + esc(l.x.name) + '</b><span class="muted small">' + fmt(l.unit) + '</span></div>' +
     '<div class="stp"><button class="ibtn" data-act="qtyMinus" data-id="' + l.x.id + '" aria-label="-">' + ic('minus', 16) + '</button><b>' + l.qty + '</b><button class="ibtn" data-act="qtyPlus" data-id="' + l.x.id + '" aria-label="+">' + ic('plus', 16) + '</button></div>' +
     '<b class="lp">' + fmt(rnd(l.unit * l.qty)) + '</b></div>').join('') +
     '<div class="row" style="margin-top:12px"><input id="cpn" class="inp" style="flex:1" placeholder="' + t('coupon') + '" value="' + (S.coupon ? esc(S.coupon.code) : '') + '"><button class="btn ghost" style="flex:none" data-act="applyCoupon">' + t('apply') + '</button></div>' +
     (S.cpnErr ? '<p class="err" style="margin:4px 0">' + S.cpnErr + '</p>' : '') +
-    '<div class="tot"><span>' + t('subtotal') + '</span><b>' + fmt(T.sub) + '</b></div>' +
-    (T.disc ? '<div class="tot"><span>' + t('coupon') + ' (-' + T.pct + '%)</span><b>-' + fmt(T.disc) + '</b></div>' : '') +
-    '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(T.total) + '</b></div>' +
-    '<div class="tot muted small"><span>' + t('wallet') + '</span><b>' + money(c.wallet) + '</b></div>' +
-    (short ? '<p class="err">' + t('noFunds') + '</p>' : '') +
-    '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('keepShopping') + '</button><button class="btn" data-act="checkout">' + ic('check') + ' ' + t('checkout') + '</button></div>';
+    (mathOn ? '<p class="center muted" style="margin:12px 0 0">🧮 ' + t('addUpHint') + (T.pct ? ' · ' + t('coupon') + ' -' + T.pct + '%' : '') + '</p>' :
+      '<div class="tot"><span>' + t('subtotal') + '</span><b>' + fmt(T.sub) + '</b></div>' +
+      (T.disc ? '<div class="tot"><span>' + t('coupon') + ' (-' + T.pct + '%)</span><b>-' + fmt(T.disc) + '</b></div>' : '') +
+      '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(T.total) + '</b></div>') +
+    '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('keepShopping') + '</button><button class="btn" data-act="checkout">' + ic(mathOn ? 'target' : 'check') + ' ' + t(mathOn ? 'addUp' : 'checkout') + '</button></div>';
 }
+const focusSoon = sel => setTimeout(() => { const i = $(sel); if (i) i.focus(); }, 80);
+function toChange() { const P = S.pay; P.stage = 'change'; P.tries = 0; P.reveal = false; P.err = ''; sheet(payHtml()); focusSoon('#chg'); }
 function niceUp(v) {
   for (let e = 1; e <= 1e8; e *= 10) for (const m of [e, 2 * e, 5 * e]) if (m > v) return m;
   return Math.ceil(v) + 1;
 }
 function payHtml() {
   const P = S.pay, c = S.shopper, change = rnd(P.bill - P.total);
-  return '<h2>' + t('checkout') + '</h2><p class="center muted">' + t('customerPays', { n: esc(c.name) }) + '</p>' +
-    '<div class="note">' + fmt(P.bill) + '</div>' +
-    '<div class="tot"><span>' + t('total') + '</span><b>' + fmt(P.total) + '</b></div>' +
+  if (P.stage === 'sum') {
+    const lines = cartLines().map(l => '<div class="tot"><span>' + esc(l.x.name) + ' ×' + l.qty + ' <small class="muted">(' + fmt(l.unit) + ')</small></span></div>').join('');
+    return '<h2>🧮 ' + t('addUp') + '</h2><p class="center muted">' + t(P.hard ? 'sumQ2' : 'sumQ') + '</p>' + lines +
+      (P.hard && S.coupon ? '<div class="tot"><span>' + esc(S.coupon.code) + '</span><b>-' + S.coupon.pct + '%</b></div>' : '') +
+      (P.reveal ? '<div class="note ok">' + fmt(P.target) + '</div><button class="btn big" data-act="sumNext">' + t('next') + '</button>' :
+        '<input id="ans" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="?" autocomplete="off"><p class="err" id="anserr">' + (P.err || '') + '</p>' +
+        '<div class="row"><button class="btn ghost" data-act="sumSkip">' + t('skip') + '</button><button class="btn" data-act="sumCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
+  }
+  return '<h2>' + t('checkout') + '</h2>' + (P.disc && !P.hard ? '<div class="tot"><span>' + t('coupon') + '</span><b>-' + fmt(P.disc) + '</b></div>' : '') + '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(P.total) + '</b></div>' +
+    '<p class="center muted">' + t('customerPays', { n: esc(c.name) }) + '</p><div class="note">' + fmt(P.bill) + '</div>' +
     '<p class="center" style="font-size:18px">' + t('giveChange') + '</p>' +
-    (P.reveal ? '<div class="note ok">' + fmt(change) + '</div><button class="btn big" data-act="payDone" data-m="0">' + t('next') + '</button>' :
+    (P.reveal ? '<div class="note ok">' + fmt(change) + '</div><button class="btn big" data-act="payDone">' + t('next') + '</button>' :
       '<input id="chg" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="?" autocomplete="off"><p class="err" id="chgerr">' + (P.err || '') + '</p>' +
-      '<div class="row"><button class="btn ghost" data-act="payDone" data-m="0">' + t('skip') + '</button><button class="btn" data-act="payCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
+      '<div class="row"><button class="btn ghost" data-act="paySkip">' + t('skip') + '</button><button class="btn" data-act="payCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
 }
-function doneHtml(o, math) {
+function doneHtml(o, math) {   // math = number of correct answers
   return '<div class="center sold"><div class="okwrap"><div class="okbig">' + ic('check', 46) + '</div>' + [-60, -20, 20, 60].map((x, i) => '<span class="coin" style="--dx:' + x + 'px;--d:' + (0.3 + i * 0.1) + 's"></span>').join('') + '</div>' +
-    '<h2>' + t('orderPlaced') + '</h2><p class="muted">#' + o.n + ' · ' + fmt(o.total, o.cur) + (math ? ' · +5 XP 🧮' : '') + '</p>' +
+    '<h2>' + t('orderPlaced') + '</h2><p class="muted">#' + o.n + ' · ' + fmt(o.total, o.cur) + (math ? ' · +' + o.xp + ' XP 🧮' : '') + '</p>' +
     '<p>' + t('thanks', { n: esc(o.cname) }) + '</p><p class="muted small">' + t('thanksSub') + '</p>' +
     '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('keepShopping') + '</button><button class="btn" data-act="toShop">' + ic('shop') + ' ' + t('myShop') + '</button></div></div>';
 }
@@ -414,9 +483,9 @@ function orderRow(o) {
 function ordersView() {
   const today = dkey(), day = S.day || today;
   const dayOrders = S.orders.filter(o => o.day === day);
-  const rev = dayOrders.reduce((s, o) => s + o.usd, 0), items = dayOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
+  const rev = dayOrders.reduce((s, o) => s + inCur(o.total, o.cur), 0), items = dayOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
   const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(day, i - 6));
-  const sums = days.map(k => S.orders.filter(o => o.day === k).reduce((s, o) => s + o.usd, 0)), mx = Math.max(...sums, 0.0001);
+  const sums = days.map(k => S.orders.filter(o => o.day === k).reduce((s, o) => s + inCur(o.total, o.cur), 0)), mx = Math.max(...sums, 0.0001);
   const todo = S.orders.filter(o => o.status !== 'delivered').sort((a, b) => a.ts - b.ts);
   const done = dayOrders.filter(o => o.status === 'delivered').sort((a, b) => b.ts - a.ts);
   return head(t('dailySales'), null, 'toShop') +
@@ -434,7 +503,7 @@ function orderHtml(o) {
     o.items.map(i => '<div class="tot"><span>' + esc(i.name) + ' ×' + i.qty + '</span><b>' + fmt(rnd(i.unit * i.qty, o.cur), o.cur) + '</b></div>').join('') +
     (o.disc ? '<div class="tot"><span>' + esc(o.code) + ' (-' + o.pct + '%)</span><b>-' + fmt(o.disc, o.cur) + '</b></div>' : '') +
     '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(o.total, o.cur) + '</b></div>' +
-    (rv ? '<div class="review">' + stars(rv.stars) + '<p>“' + t('rv' + rv.stars + '_' + rv.k) + '”</p>' + (o.tip ? '<p class="tag">+' + money(o.tip) + ' ' + t('tip') + '</p>' : '') + '</div>' : '') +
+    (rv ? '<div class="review">' + stars(rv.stars) + '<p>“' + t('rv' + rv.stars + '_' + rv.k) + '”</p>' + (o.tip ? '<p class="tag">+' + money(o.tip, o.cur) + ' ' + t('tip') + '</p>' : '') + '</div>' : '') +
     (o.status !== 'delivered' ? '<button class="btn big" data-act="advance" data-id="' + o.id + '">' + ic(ST_ICON[ST[idx + 1]]) + ' ' + t('adv_' + o.status) + '</button>' : '') +
     '<button class="btn ghost big" data-act="closeSheet">' + t('done') + '</button>';
 }
@@ -446,7 +515,7 @@ function goalsView() {
   if (tab === 'missions') {
     body = '<p class="muted small">' + t('missionsHint') + '</p>' + ensureMissions(p).list.map(m => {
       const d = MISSIONS.find(x => x.id === m.id), ok = m.prog >= d.goal;
-      return '<div class="mis"><div class="row" style="margin:0"><b style="flex:1">' + t('m_' + d.id, { n: d.goal }) + '</b><span class="pill gold">' + ic('coin', 14) + ' ' + money(d.r) + '</span></div>' +
+      return '<div class="mis"><div class="row" style="margin:0"><b style="flex:1">' + t('m_' + d.id, { n: d.goal }) + '</b><span class="pill gold">' + ic('coin', 14) + ' ' + money(lp(d.r)) + '</span></div>' +
         '<div class="xp" style="margin:8px 0"><i style="width:' + Math.round(m.prog / d.goal * 100) + '%"></i></div>' +
         '<div class="row" style="margin:0"><span class="muted small" style="flex:1">' + m.prog + ' / ' + d.goal + '</span>' +
         (m.claimed ? '<span class="st delivered">' + t('claimed') + ' ✓</span>' : '<button class="btn sm" style="width:auto;margin:0" data-act="claim" data-id="' + m.id + '"' + (ok ? '' : ' disabled') + '>' + t('claim') + '</button>') + '</div></div>';
@@ -454,8 +523,8 @@ function goalsView() {
   } else if (tab === 'badges') {
     body = '<div class="bgrid">' + BADGES.map(b => { const on = p.badges.includes(b.id); return '<div class="badge-t ' + (on ? '' : 'lock') + '"><i>' + b.e + '</i><b>' + t('b_' + b.id) + '</b><small class="muted">' + t('bd_' + b.id) + '</small></div>'; }).join('') + '</div>';
   } else {
-    const rows = S.profiles.slice().sort((a, b) => b.st.rev - a.st.rev);
-    body = rows.map((x, i) => '<div class="prow"><b style="flex:none;width:26px">' + (['🥇', '🥈', '🥉'][i] || (i + 1)) + '</b>' + mas(x.mascot, 40) + '<div class="gr"><b>' + esc(x.name) + '</b><div class="muted small">' + t('level', { n: level(x) }) + ' · ' + t('sold') + ': ' + x.st.sold + '</div></div><span class="pill gold">' + money(x.st.rev) + '</span></div>').join('');
+    const usdv = x => x.st.rev / rateOf(x.currency), rows = S.profiles.slice().sort((a, b) => usdv(b) - usdv(a));
+    body = rows.map((x, i) => '<div class="prow"><b style="flex:none;width:26px">' + (['🥇', '🥈', '🥉'][i] || (i + 1)) + '</b>' + mas(x.mascot, 40) + '<div class="gr"><b>' + esc(x.name) + '</b><div class="muted small">' + t('level', { n: level(x) }) + ' · ' + t('sold') + ': ' + x.st.sold + '</div></div><span class="pill gold">' + money(x.st.rev, x.currency) + '</span></div>').join('');
   }
   return head(t('goals'), null, 'toShop') + '<div class="seg">' + ['missions', 'badges', 'ranks'].map(k => '<button class="' + (tab === k ? 'sel' : '') + '" data-act="gtab" data-v="' + k + '">' + t('tab_' + k) + '</button>').join('') + '</div><div style="margin-top:10px">' + body + '</div>';
 }
@@ -463,13 +532,15 @@ function goalsView() {
 /* ----- decoration shop and deals ----- */
 function decorHtml() {
   const p = S.cur;
-  const skins = SKINS.map(([k, lv]) => { const ok = level(p) >= lv; return '<button class="chip ' + (p.skin === k ? 'sel' : '') + '" data-act="skin" data-v="' + k + '">' + (ok ? '' : '🔒 ') + t('skin_' + k) + (ok ? '' : ' · ' + t('level', { n: lv })) + '</button>'; }).join('');
+  const skins = SKINS.map(([k, lv, em]) => { const ok = level(p) >= lv; return '<button class="chip ' + (p.skin === k ? 'sel' : '') + '" data-act="skin" data-v="' + k + '">' + (ok ? em + ' ' : '🔒 ') + t('skin_' + k) + (ok ? '' : ' · ' + t('level', { n: lv })) + '</button>'; }).join('');
   const sec = SLOTS.map(s => '<h3 class="sech">' + t('slot_' + s) + '</h3><div class="dgrid">' + DECOR.filter(d => d.slot === s).map(d => {
     const own = p.owned.includes(d.id), eq = p.eq[s] === d.id;
-    return '<div class="dcard ' + (eq ? 'eq' : '') + '"><i>' + d.e + '</i><b>' + t('d_' + d.id) + '</b>' + (own ? '<button class="btn sm ' + (eq ? 'ghost' : '') + '" data-act="equip" data-id="' + d.id + '">' + (eq ? t('unequip') : t('equip')) + '</button>' : '<button class="btn sm blue" data-act="buyDecor" data-id="' + d.id + '">' + money(d.p) + '</button>') + '</div>';
+    return '<div class="dcard ' + (eq ? 'eq' : '') + '"><i>' + d.e + '</i><b>' + t('d_' + d.id) + '</b>' + (own ? '<button class="btn sm ' + (eq ? 'ghost' : '') + '" data-act="equip" data-id="' + d.id + '">' + (eq ? t('unequip') : t('equip')) + '</button>' : '<button class="btn sm blue" data-act="buyDecor" data-id="' + d.id + '">' + money(lp(d.p)) + '</button>') + '</div>';
   }).join('') + '</div>').join('');
   return '<div class="oh"><h2 style="margin:0">' + t('decor') + '</h2><span class="pill gold">' + ic('coin', 14) + ' ' + money(p.cash) + '</span></div>' +
-    '<h3 class="sech">' + t('shopTheme') + '</h3><div class="chips wrap">' + skins + '</div>' + sec + '<button class="btn ghost big" data-act="closeSheet">' + t('done') + '</button>';
+    '<h3 class="sech">' + t('shopTheme') + '</h3><div class="chips wrap">' + skins + '</div>' +
+    '<h3 class="sech">' + t('studio') + '</h3><div class="chips wrap"><button class="chip ' + (p.wall !== false ? 'sel' : '') + '" data-act="wall">🖼️ ' + t('wallpaper') + ' · ' + t(p.wall !== false ? 'on' : 'off') + '</button></div>' +
+    '<div class="muted small" style="margin-top:8px">' + t('awning') + '</div><div class="swr"><button class="auto ' + (p.awn ? '' : 'sel') + '" data-act="awn" data-v="">' + t('auto') + '</button>' + BGS.concat(ACCENTS).map(c => '<button class="' + (p.awn === c ? 'sel' : '') + '" style="background:' + c + '" data-act="awn" data-v="' + c + '" aria-label="' + c + '"></button>').join('') + '</div>' + sec + '<button class="btn ghost big" data-act="closeSheet">' + t('done') + '</button>';
 }
 function dealsHtml() {
   const p = S.cur;
@@ -482,7 +553,8 @@ function dealsHtml() {
 
 /* ----- parent panel ----- */
 function parentView() {
-  const rows = S.profiles.map(p => '<div class="prow">' + mas(p.mascot, 40) + '<div class="gr"><b>' + esc(p.name) + '</b><div class="muted small">' + t('level', { n: level(p) }) + ' · ' + t('sold') + ': ' + p.st.sold + ' · ' + t('revenue') + ': ' + fmt(loc(p.st.rev, p.currency), p.currency) + (p.st.rcount ? ' · ⭐ ' + (p.st.rsum / p.st.rcount).toFixed(1) : '') + '</div></div>' +
+  const rows = S.profiles.map(p => '<div class="prow">' + mas(p.mascot, 40) + '<div class="gr"><b>' + esc(p.name) + '</b><div class="muted small">' + t('level', { n: level(p) }) + ' · ' + t('sold') + ': ' + p.st.sold + ' · ' + t('revenue') + ': ' + fmt(p.st.rev, p.currency) + (p.st.rcount ? ' · ⭐ ' + (p.st.rsum / p.st.rcount).toFixed(1) : '') + ' · 🧮 ' + p.st.math + '/' + p.st.mq + '</div>' +
+    '<div class="seg sm">' + ['off', 'easy', 'normal'].map(k => '<button class="' + (p.mathLvl === k ? 'sel' : '') + '" data-act="mathLvl" data-id="' + p.id + '" data-v="' + k + '">' + t('math_' + k) + '</button>').join('') + '</div></div>' +
     '<button class="ibtn red" data-act="delProfile" data-id="' + p.id + '" aria-label="' + t('delete') + '">' + ic('trash') + '</button></div>').join('');
   return head(t('parent'), null, 'parentDone') +
     '<h2>' + t('profiles') + '</h2>' + rows + '<button class="btn big" data-act="newProfile">' + ic('plus') + ' ' + t('addProfile') + '</button>' +
@@ -541,31 +613,36 @@ async function openProfile(id) {
 }
 
 /* ---------- orders: create, deliver ---------- */
-async function finishOrder(math) {
-  const p = S.cur, c = S.shopper, T = cartTotals(), cur = curCode(), r = rateOf(cur);
+async function finishOrder(ok, asked) {      // ok = correct math answers, asked = questions asked
+  if (S.ordering) return;
+  const p = S.cur, c = S.shopper, T = cartTotals(), cur = curCode();
   if (!T.count) return;
-  const usd = round2(T.total / r);
-  p.seq = (p.seq || 0) + 1;
-  const o = {
-    id: uid(), pid: p.id, n: p.seq, cid: c.id, cname: c.name, cmas: c.mascot, chat: c.hat, ccol: c.color, pers: c.pers,
-    items: T.ls.map(l => ({ id: l.x.id, name: l.x.name, qty: l.qty, unit: l.unit })),
-    sub: T.sub, disc: T.disc, pct: T.pct, code: S.coupon ? S.coupon.code : '', total: T.total, cur, usd,
-    status: 'ordered', day: dkey(), ts: Date.now(), review: null, tip: 0
-  };
-  for (const l of T.ls) { l.x.qty -= l.qty; await DB.put('products', l.x); }
-  c.wallet = Math.max(0, round2(c.wallet - usd)); c.orders = (c.orders || 0) + 1; c.spent = round2((c.spent || 0) + usd);
-  await DB.put('customers', c);
-  p.cash = round2(p.cash + usd);              // the real value of the purchase goes into the cash
-  p.st.rev = round2(p.st.rev + usd); p.st.sold += T.count; p.st.orders++;
-  addXp(10 + (math ? 5 : 0));
-  if (math) { p.st.math++; track('math', 1); }
-  track('items', T.count); track('order', 1); if (T.count >= 3) track('big', 1);
-  S.orders.push(o); await DB.put('orders', o);
-  checkBadges(); await saveP();
-  S.cart = []; S.coupon = null; S.cpnErr = '';
-  sfx.cha();
-  sheet(doneHtml(o, math));
-  render();
+  S.ordering = true;
+  try {
+    const xp = 10 + ok * 4;
+    p.seq = (p.seq || 0) + 1;
+    const o = {
+      id: uid(), pid: p.id, n: p.seq, cid: c.id, cname: c.name, cmas: c.mascot, chat: c.hat, ccol: c.color, pers: c.pers,
+      items: T.ls.map(l => ({ id: l.x.id, name: l.x.name, qty: l.qty, unit: l.unit })),
+      sub: T.sub, disc: T.disc, pct: T.pct, code: S.coupon ? S.coupon.code : '', total: T.total, cur, xp,
+      status: 'ordered', day: dkey(), ts: Date.now(), review: null, tip: 0, tipc: 1
+    };
+    for (const l of T.ls) { l.x.qty -= l.qty; await DB.put('products', l.x); }
+    c.budget = Math.max(0, rnd(c.budget - T.total)); c.orders = (c.orders || 0) + 1; c.spent = rnd((c.spent || 0) + T.total);
+    await DB.put('customers', c);
+    p.cash = rnd(p.cash + T.total);              // the real value of the purchase goes into the cash
+    p.st.rev = rnd(p.st.rev + T.total); p.st.sold += T.count; p.st.orders++;
+    p.st.math += ok; p.st.mq += asked;
+    addXp(xp);
+    if (ok) track('math', ok);
+    track('items', T.count); track('order', 1); if (T.count >= 3) track('big', 1);
+    S.orders.push(o); await DB.put('orders', o);
+    checkBadges(); await saveP();
+    S.cart = []; S.coupon = null; S.cpnErr = '';
+    sfx.cha();
+    sheet(doneHtml(o, ok));
+    render();
+  } finally { S.ordering = false; }
 }
 function starsFor(pers) {
   const r = Math.random();
@@ -576,8 +653,8 @@ function starsFor(pers) {
 async function deliver(o) {
   const p = S.cur, st = starsFor(o.pers);
   o.review = { stars: st, k: Math.floor(Math.random() * 2) };
-  o.tip = (o.pers === 'generous' && st === 5) ? round2(o.usd * 0.1) : 0;
-  p.cash = round2(p.cash + o.tip);
+  o.tip = (o.pers === 'generous' && st === 5) ? rnd(o.total * 0.1, o.cur) : 0;
+  p.cash = rnd(p.cash + conv(o.tip, o.cur, curCode()));
   p.st.delivered++; p.st.rsum += st; p.st.rcount++;
   if (st === 5) { p.st.five++; track('five', 1); }
   track('deliver', 1);
@@ -585,34 +662,63 @@ async function deliver(o) {
   checkBadges();
   await saveP();
   sfx.bell();
-  toast('⭐ ' + st + '/5' + (o.tip ? ' · +' + money(o.tip) : ''));
+  toast('⭐ ' + st + '/5' + (o.tip ? ' · +' + money(o.tip, o.cur) : ''));
 }
 
-/* ---------- navigation: the phone's back button ---------- */
+/* ---------- navigation: the phone's back button ----------
+   The app always sits on one guard history entry (G) above the root entry (R). Back lands on R, we handle it
+   (close a sheet, go up one screen, ask in the shop) and push G again. On the profiles screen we do NOT push it,
+   so a second back press really leaves the app. */
+let armed = false, rearmT = 0;
+function rearm() { if (!armed && !S.exiting) { armed = true; history.pushState({ g: 1 }, ''); } }
+function byeScreen() {
+  if ($('#bye')) return;
+  const d = document.createElement('div');
+  d.id = 'bye'; d.className = 'ov center';
+  d.innerHTML = '<div class="sheet"><div style="font-size:54px">👋</div><h2>' + t('byeTitle') + '</h2><p class="muted">' + t('byeHint') + '</p><button class="btn big" data-act="stayBye">' + t('stay') + '</button></div>';
+  document.body.appendChild(d);
+}
 function exitApp() {
   S.exiting = true;
-  history.go(-2);
-  setTimeout(() => { try { window.close(); } catch (e) { /* ignore */ } S.exiting = false; }, 400);
+  const hadGuard = armed; armed = false;
+  try { if (hadGuard) history.back(); } catch (e) { /* ignore */ }
+  setTimeout(() => { try { window.close(); } catch (e) { /* ignore */ } setTimeout(byeScreen, 350); }, 250);
+}
+function leaveShopBox() {
+  sheet('<h2>' + t('leaveShopQ') + '</h2><div class="stack"><button class="btn ghost" data-act="closeSheet">' + ic('shop') + ' ' + t('stay') + '</button>' +
+    '<button class="btn" data-act="goProfiles">' + ic('users') + ' ' + t('toProfiles') + '</button>' +
+    '<button class="btn red" data-act="exitNow">' + ic('x') + ' ' + t('exitApp') + '</button></div>');
 }
 function handleBack() {
+  if ($('#bye')) { ACT.stayBye(); return; }
   if ($('#ov')) { closeSheet(); return; }           // 1. close an open sheet first
   const v = S.view;
-  if (v === 'shop') { confirmBox('leaveShopQ', 'leave', () => ACT.home()); return; }
-  if (v === 'picker' || v === 'setup') { confirmBox('exitQ', 'exit', exitApp); return; }
+  if (v === 'shop') { leaveShopBox(); return; }
+  if (v === 'picker' || v === 'setup') { toast(t('pressAgain')); return; }
   if (v === 'store') { ACT.leaveStore(); return; }
   const m = { item: 'cancelItem', pform: 'cancelForm', cform: 'cancelCust', custs: 'toShop', orders: 'toShop', goals: 'toShop', parent: 'parentDone' }[v];
   if (m) ACT[m]();
 }
 window.addEventListener('popstate', () => {
   if (S.exiting) return;
-  history.pushState({ g: 1 }, '');                  // keep one guard entry so back never leaves by accident
-  handleBack();
+  armed = false;                                    // we are back on the root entry
+  clearTimeout(rearmT);
+  const v = S.view;
+  if (!$('#ov') && !$('#bye') && (v === 'picker' || v === 'setup')) {
+    toast(t('pressAgain'));                         // no guard now: pressing back again leaves the app
+    rearmT = setTimeout(rearm, 2400);
+    return;
+  }
+  rearm(); handleBack();
 });
 
 /* ---------- actions ---------- */
 const ACT = {
   closeSheet,
   back() { handleBack(); },
+  goProfiles() { closeSheet(); ACT.home(); },
+  exitNow() { closeSheet(); exitApp(); },
+  stayBye() { const d = $('#bye'); if (d) d.remove(); S.exiting = false; rearm(); },
   confirmYes() { const cb = S.cb; S.cb = null; closeSheet(); if (cb) cb(); },
   async install() { if (!deferredInstall) return; deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; render(); },
   async lang() { S.lang = S.lang === 'en' ? 'ar' : 'en'; await setMeta('lang', S.lang); applyLang(); render(); },
@@ -620,14 +726,14 @@ const ACT = {
   async sound() { S.sound = !S.sound; SFX.on = S.sound; await setMeta('sound', S.sound); if (S.sound) sfx.coin(); render(); },
 
   async setupDone() {
-    const v = $('#setpin').value;
+    const v = normDigits($('#setpin').value);
     if (!/^\d{4}$/.test(v)) { $('#seterr').textContent = t('pinFour'); return; }
     S.pin = await hashPin(v); await setMeta('pin', S.pin);
     S.draft = newDraft(); S.back = 'picker'; setView('pform');
   },
   async pinok() {
     const i = $('#pinin'); if (!i) return;
-    if ((await hashPin(i.value)) === S.pin) { closeSheet(); const cb = PINCB; PINCB = null; if (cb) cb(); }
+    if ((await hashPin(normDigits(i.value))) === S.pin) { closeSheet(); const cb = PINCB; PINCB = null; if (cb) cb(); }
     else { $('#pinerr').textContent = t('wrongPin'); sfx.err(); i.value = ''; i.focus(); }
   },
   parent() { askPin(() => setView('parent')); },
@@ -638,7 +744,7 @@ const ACT = {
   },
   async parentDone() {
     document.querySelectorAll('[data-rate]').forEach(i => {
-      const v = parseFloat(String(i.value).replace(',', '.'));
+      const v = parseNum(i.value);
       if (v > 0) S.rates[i.dataset.rate] = v;
     });
     await setMeta('rates', S.rates);
@@ -648,7 +754,7 @@ const ACT = {
     sheet('<h2>' + t('newPin') + '</h2><input id="npin" class="inp pin" type="password" inputmode="numeric" maxlength="4" autocomplete="off"><p class="err" id="nerr"></p><div class="row"><button class="btn ghost" data-act="closeSheet">' + t('cancel') + '</button><button class="btn" data-act="changePinOk">' + t('save') + '</button></div>');
   },
   async changePinOk() {
-    const v = $('#npin').value;
+    const v = normDigits($('#npin').value);
     if (!/^\d{4}$/.test(v)) { $('#nerr').textContent = t('pinFour'); return; }
     S.pin = await hashPin(v); await setMeta('pin', S.pin); closeSheet(); toast(t('saved'));
   },
@@ -663,7 +769,7 @@ const ACT = {
     }, esc(p.name), true);
   },
   async exportData() {
-    const data = { app: 'myshop', v: 2, ts: Date.now(), meta: { lang: S.lang, theme: S.theme, pin: S.pin, rates: S.rates, sound: S.sound },
+    const data = { app: 'myshop', v: 3, ts: Date.now(), meta: { lang: S.lang, theme: S.theme, pin: S.pin, rates: S.rates, sound: S.sound },
       profiles: await DB.all('profiles'), products: await DB.all('products'), customers: await DB.all('customers'), orders: await DB.all('orders') };
     const blob = new Blob([JSON.stringify(data)], { type: 'application/json' }), name = 'myshop-backup-' + dkey() + '.json';
     try {
@@ -691,15 +797,21 @@ const ACT = {
     syncDraft();
     const d = S.draft, name = d.name.trim();
     if (!name) { toast(t('nameReq')); sfx.err(); return; }
-    const old = d.id ? S.profiles.find(x => x.id === d.id) : null;
-    const rec = normProfile(Object.assign(old || { id: uid(), cash: 20, xp: 0, created: Date.now() }, {
+    const old = d.id ? S.profiles.find(x => x.id === d.id) : null, oldCur = old && old.currency;
+    const rec = normProfile(Object.assign(old || { id: uid(), cash: Math.round(20 * rateOf(d.currency) / 5) * 5, xp: 0, created: Date.now(), m3: true }, {
       name, shopName: (d.shopName || '').trim() || t('shopOf', { n: name }), mascot: d.mascot, theme: d.theme, accent: d.accent, currency: d.currency
     }));
+    if (old && oldCur !== d.currency) {            // the shop changes currency: convert everything it owns
+      for (const x of S.products) { x.pr = Math.max(minUnit(d.currency), conv(x.pr, oldCur, d.currency)); await DB.put('products', x); }
+      rec.cash = conv(rec.cash, oldCur, d.currency); rec.st.rev = conv(rec.st.rev, oldCur, d.currency);
+      for (const c of S.customers) { c.day = ''; c.budget = null; await DB.put('customers', c); }
+    }
     await DB.put('profiles', rec);
     if (!old) { S.profiles.push(rec); await seedCustomers(rec.id); }
     sfx.coin();
     await openProfile(rec.id);
   },
+  async mathLvl(d) { const p = S.profiles.find(x => x.id === d.id); if (!p) return; p.mathLvl = d.v; await DB.put('profiles', p); render(); },
   toggleOpen() { S.cur.open = !S.cur.open; saveP(); S.cur.open ? sfx.bell() : sfx.whoosh(); toast(S.cur.open ? t('nowOpen') : t('nowClosed')); render(); },
 
   /* items */
@@ -708,41 +820,42 @@ const ACT = {
   pickCat(d) { syncItem(); S.idraft.cat = d.v; render(); },
   pickDisc(d) { syncItem(); S.idraft.disc = parseInt(d.v, 10); render(); },
   prod(d) {
-    const x = S.products.find(p => p.id === d.id), cost = round2(x.usd * 0.5 * RESTOCK_N);
+    const x = S.products.find(p => p.id === d.id), cost = restockCost(x);
     sheet('<div class="bigimg">' + imgOrPh(x, 60) + '</div><h2 style="margin:0">' + catEmoji(x.cat) + ' ' + esc(x.name) + '</h2>' +
       '<p class="prices">' + priceTag(x) + ' <span class="muted">' + t('inStock', { n: x.qty }) + '</span></p>' +
       '<button class="btn blue big" style="margin-top:4px" data-act="restock" data-id="' + x.id + '">' + ic('box') + ' ' + t('restock') + ' +' + RESTOCK_N + ' · ' + money(cost) + '</button>' +
       '<div class="row"><button class="btn ghost" data-act="editItem" data-id="' + x.id + '">' + ic('edit') + ' ' + t('edit') + '</button><button class="btn red" data-act="delItem" data-id="' + x.id + '">' + ic('trash') + ' ' + t('delete') + '</button></div>');
   },
   async restock(d) {
-    const x = S.products.find(p => p.id === d.id), cost = round2(x.usd * 0.5 * RESTOCK_N), p = S.cur;
+    const x = S.products.find(p => p.id === d.id), cost = restockCost(x), p = S.cur;
     if (p.cash < cost) { toast(t('notEnough')); sfx.err(); return; }
     if (x.qty + RESTOCK_N > 99) { toast(t('maxStock')); sfx.err(); return; }
-    p.cash = round2(p.cash - cost); x.qty += RESTOCK_N; p.st.restock++;
+    p.cash = rnd(p.cash - cost); x.qty += RESTOCK_N; p.st.restock++;
     await DB.put('products', x); checkBadges(); await saveP();
     sfx.whoosh(); closeSheet(); render(); toast('📦 +' + RESTOCK_N);
   },
   editItem(d) {
     closeSheet();
     const x = S.products.find(p => p.id === d.id);
-    S.idraft = { id: x.id, name: x.name, price: x.price, cur: x.cur, qty: x.qty, img: x.img, created: x.created, cat: x.cat || 'other', disc: x.disc || 0, fav: x.fav };
+    S.idraft = { id: x.id, name: x.name, price: x.pr, cur: curCode(), qty: x.qty, img: x.img, created: x.created, cat: x.cat || 'other', disc: x.disc || 0, fav: x.fav };
     setView('item');
   },
   delItem(d) {
     confirmBox('confirmDelete', 'yes', async () => {
-      await DB.del('products', d.id); S.products = S.products.filter(p => p.id !== d.id); render();
+      await DB.del('products', d.id); S.products = S.products.filter(p => p.id !== d.id); await rebudget(); render();
     }, null, true);
   },
   async saveItem() {
     syncItem();
-    const d = S.idraft, name = d.name.trim(), price = parseFloat(String(d.price).replace(',', '.'));
+    const d = S.idraft, name = d.name.trim(), price = parseNum(d.price), pr = conv(price, d.cur, curCode());
     if (!name) { toast(t('nameReq')); sfx.err(); return; }
-    if (!(price > 0)) { toast(t('priceReq')); sfx.err(); return; }
-    const qty = d.id ? d.qty : Math.max(1, Math.min(99, parseInt(d.qty, 10) || 1));
-    const rec = { id: d.id || uid(), pid: S.cur.id, name, price, cur: d.cur, usd: price / rateOf(d.cur), qty, img: d.img || '', created: d.created || Date.now(), cat: d.cat || 'other', disc: d.disc || 0, fav: !!d.fav };
+    if (!(price > 0) || !(pr >= minUnit())) { toast(t('priceReq')); sfx.err(); return; }
+    const qty = d.id ? d.qty : Math.max(1, Math.min(99, parseInt(normDigits(d.qty), 10) || 1));
+    const rec = { id: d.id || uid(), pid: S.cur.id, name, price: pr, cur: curCode(), pr, qty, img: d.img || '', created: d.created || Date.now(), cat: d.cat || 'other', disc: d.disc || 0, fav: !!d.fav };
     await DB.put('products', rec);
     const i = S.products.findIndex(p => p.id === rec.id);
     if (i >= 0) S.products[i] = rec; else { S.products.push(rec); track('add', 1); await saveP(); }
+    await rebudget();
     sfx.coin(); setView('shop'); toast(t('saved'));
   },
 
@@ -763,7 +876,7 @@ const ACT = {
     const d = S.cdraft, name = d.name.trim();
     if (!name) { toast(t('nameReq')); sfx.err(); return; }
     const old = d.id ? S.customers.find(x => x.id === d.id) : null;
-    const rec = Object.assign(old || { id: uid(), pid: S.cur.id, wallet: 0, day: '', orders: 0, spent: 0, created: Date.now() }, { name, mascot: d.mascot, hat: d.hat, color: d.color, pers: d.pers });
+    const rec = Object.assign(old || { id: uid(), pid: S.cur.id, budget: null, day: '', orders: 0, spent: 0, created: Date.now() }, { name, mascot: d.mascot, hat: d.hat, color: d.color, pers: d.pers });
     if (old && old.pers !== d.pers) rec.day = '';   // refill with the new personality's wallet
     await DB.put('customers', rec);
     if (!old) { S.customers.push(rec); S.cur.st.custs++; checkBadges(); await saveP(); }
@@ -780,7 +893,9 @@ const ACT = {
   shopAs(d) {
     if (!S.cur.open) { toast(t('closedMsg')); sfx.err(); return; }
     if (!S.products.length) { toast(t('noItems')); sfx.err(); return; }
-    S.shopper = S.customers.find(c => c.id === d.id); S.cart = []; S.coupon = null; S.cpnErr = ''; S.q = ''; S.cat = 'all';
+    const sc = S.customers.find(c => c.id === d.id);
+    if (!canShop(sc)) { toast(t('noMoney', { n: sc.name })); sfx.err(); return; }
+    S.shopper = sc; S.cart = []; S.coupon = null; S.cpnErr = ''; S.q = ''; S.cat = 'all';
     sfx.whoosh(); setView('store');
   },
   leaveStore() {
@@ -803,35 +918,53 @@ const ACT = {
     updateStore();
     const nb = $('#cbtn'); if (nb) { nb.classList.remove('bump'); void nb.offsetWidth; nb.classList.add('bump'); }
   },
-  cart() { S.cpnErr = ''; sheet(cartHtml()); },
-  qtyPlus(d) { ACT.addCart({ id: d.id }); sheet(cartHtml()); },
+  cart() { S.cpnErr = ''; if (paneOn()) { closeSheet(); refreshCart(); S.cartOpen = false; } else { S.cartOpen = true; sheet(cartHtml()); } },
+  qtyPlus(d) { ACT.addCart({ id: d.id }); refreshCart(); },
   qtyMinus(d) {
     const l = S.cart.find(q => q.id === d.id); if (!l) return;
     l.qty--; if (l.qty < 1) S.cart = S.cart.filter(q => q.id !== d.id);
-    sfx.tick(); updateStore(); sheet(cartHtml());
+    sfx.tick(); updateStore(); refreshCart();
   },
   applyCoupon() {
     const v = ($('#cpn').value || '').trim().toUpperCase(), c = S.cur.coupons.find(x => x.code === v);
     if (c) { S.coupon = c; S.cpnErr = ''; sfx.coin(); } else { S.coupon = null; S.cpnErr = v ? t('badCoupon') : ''; if (v) sfx.err(); }
-    updateStore(); sheet(cartHtml());
+    updateStore(); refreshCart();
   },
   checkout() {
-    const T = cartTotals(), c = S.shopper;
+    const T = cartTotals(), c = S.shopper, lvl = S.cur.mathLvl;
     if (!T.count) return;
-    if (T.total > loc(c.wallet)) { toast(t('noFunds')); sfx.err(); return; }
-    S.pay = { total: T.total, bill: niceUp(T.total), tries: 0, reveal: false, err: '' };
+    S.cartOpen = false;
+    if (T.total > c.budget) {                    // the customer's budget is hidden: they just say it is too much
+      sfx.err();
+      sheet('<div class="center">' + avatar(c.mascot, 80, c.hat, c.color) + '<h2>' + t('cantAfford', { n: esc(c.name) }) + '</h2><p class="muted">' + t('cantHint') + '</p><button class="btn big" data-act="cart">' + ic('cart') + ' ' + t('yourCart') + '</button></div>');
+      return;
+    }
+    if (lvl === 'off') return finishOrder(0, 0);
+    const trivial = T.ls.length === 1 && T.count === 1 && !T.pct;
+    S.pay = { stage: trivial ? 'change' : 'sum', hard: lvl === 'normal', target: lvl === 'normal' ? T.total : T.sub, total: T.total, disc: T.disc, bill: niceUp(T.total), tries: 0, reveal: false, err: '', ok: 0, asked: 0 };
     sheet(payHtml());
-    setTimeout(() => { const i = $('#chg'); if (i) i.focus(); }, 80);
+    focusSoon(trivial ? '#chg' : '#ans');
   },
-  payCheck() {
-    const P = S.pay, i = $('#chg'), v = parseFloat(String(i.value).replace(',', '.'));
-    const change = rnd(P.bill - P.total);
-    if (Math.abs(v - change) < 0.006) { sfx.star(); finishOrder(true); return; }
+  sumCheck() {
+    const P = S.pay, v = parseNum($('#ans').value);
+    if (isNaN(v)) return;
+    if (Math.abs(v - P.target) < 0.004) { sfx.star(); P.ok++; P.asked++; toChange(); return; }
     P.tries++; sfx.err();
-    if (P.tries >= 2) { P.reveal = true; P.err = ''; } else P.err = t('tryAgain');
-    sheet(payHtml());
+    if (P.tries >= 2) { P.reveal = true; P.asked++; P.err = ''; } else P.err = t('tryAgain');
+    sheet(payHtml()); focusSoon('#ans');
   },
-  payDone() { finishOrder(false); },
+  sumSkip() { const P = S.pay; P.reveal = true; P.asked++; sheet(payHtml()); },
+  sumNext() { toChange(); },
+  payCheck() {
+    const P = S.pay, v = parseNum($('#chg').value), change = rnd(P.bill - P.total);
+    if (isNaN(v)) return;
+    if (Math.abs(v - change) < 0.004) { sfx.star(); P.ok++; P.asked++; return finishOrder(P.ok, P.asked); }
+    P.tries++; sfx.err();
+    if (P.tries >= 2) { P.reveal = true; P.asked++; P.err = ''; } else P.err = t('tryAgain');
+    sheet(payHtml()); focusSoon('#chg');
+  },
+  paySkip() { const P = S.pay; P.reveal = true; P.asked++; sheet(payHtml()); },
+  payDone() { return finishOrder(S.pay.ok, S.pay.asked); },
 
   /* orders */
   orders() { S.day = dkey(); setView('orders'); },
@@ -854,14 +987,16 @@ const ACT = {
   async claim(d) {
     const p = S.cur, m = ensureMissions(p).list.find(x => x.id === d.id), def = MISSIONS.find(x => x.id === d.id);
     if (!m || m.claimed || m.prog < def.goal) return;
-    m.claimed = true; p.cash = round2(p.cash + def.r); addXp(5);
-    sfx.coin(); checkBadges(); await saveP(); render(); toast('+' + money(def.r));
+    m.claimed = true; p.cash = rnd(p.cash + lp(def.r)); addXp(5);
+    sfx.coin(); checkBadges(); await saveP(); render(); toast('+' + money(lp(def.r)));
   },
   decor() { sheet(decorHtml()); },
   async buyDecor(d) {
     const x = DECOR.find(q => q.id === d.id), p = S.cur;
-    if (p.cash < x.p) { toast(t('notEnough')); sfx.err(); return; }
-    p.cash = round2(p.cash - x.p); p.owned.push(x.id); p.eq[x.slot] = x.id; p.st.decor++;
+    const price = lp(x.p);
+    if (p.owned.includes(x.id)) return;
+    if (p.cash < price) { toast(t('notEnough')); sfx.err(); return; }
+    p.cash = rnd(p.cash - price); p.owned.push(x.id); p.eq[x.slot] = x.id; p.st.decor++;
     sfx.cha(); checkBadges(); await saveP(); sheet(decorHtml()); render();
   },
   async equip(d) {
@@ -869,10 +1004,12 @@ const ACT = {
     if (p.eq[x.slot] === x.id) delete p.eq[x.slot]; else p.eq[x.slot] = x.id;
     sfx.pop(); await saveP(); sheet(decorHtml()); render();
   },
+  async wall() { S.cur.wall = S.cur.wall === false; applySkin(); sfx.pop(); await saveP(); sheet(decorHtml()); render(); },
+  async awn(d) { S.cur.awn = d.v || ''; sfx.pop(); await saveP(); sheet(decorHtml()); render(); },
   async skin(d) {
     const p = S.cur, s = SKINS.find(x => x[0] === d.v);
     if (level(p) < s[1]) { toast(t('lockedLevel', { n: s[1] })); sfx.err(); return; }
-    p.skin = d.v; sfx.star(); await saveP(); sheet(decorHtml()); render();
+    p.skin = d.v; applySkin(); sfx.star(); await saveP(); sheet(decorHtml()); render();
   },
   deals() { S.ncode = ''; sheet(dealsHtml()); },
   npct(d) { const i = $('#ncode'); if (i) S.ncode = i.value; S.npct = parseInt(d.v, 10); sheet(dealsHtml()); },
@@ -887,18 +1024,24 @@ const ACT = {
   async delCoupon(d) { S.cur.coupons = S.cur.coupons.filter(c => c.code !== d.code); await saveP(); sheet(dealsHtml()); }
 };
 
-let armed = false;
-function armGuard() { if (!armed) { armed = true; history.pushState({ g: 1 }, ''); } }
 document.addEventListener('click', e => {
-  armGuard();
+  rearm();
   const el = e.target.closest('[data-act]');
-  if (!el || el.disabled) return;
+  if (!el || el.disabled || S.busy) return;
   const f = ACT[el.dataset.act];
-  if (f) { sfx.tick(); f(el.dataset, el, e); }
+  if (!f) return;
+  sfx.tick();
+  const r = f(el.dataset, el, e);
+  if (r && typeof r.then === 'function') {        // async actions lock the screen until done, so a double tap cannot repeat them
+    S.busy = true;
+    const free = () => { S.busy = false; };
+    r.then(free, free); setTimeout(free, 8000);
+  }
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'pinin') ACT.pinok();
   if (e.key === 'Enter' && e.target.id === 'chg') ACT.payCheck();
+  if (e.key === 'Enter' && e.target.id === 'ans') ACT.sumCheck();
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; const g = $('#grid'); if (g) g.innerHTML = storeGrid(); }
@@ -949,7 +1092,7 @@ async function boot() {
   try { await DB.open(); } catch (e) { $('#app').innerHTML = '<p style="padding:20px">Storage is not available in this browser mode.</p>'; return; }
   await loadAll();
   applyLang(); applyTheme(S.theme, ACCENTS[0]); render();
-  history.replaceState({ root: 1 }, '');
+  history.replaceState({ root: 1 }, '');   // root entry; the guard entry is pushed on the first tap
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 }

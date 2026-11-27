@@ -7,13 +7,15 @@ Everything is stored on the device (IndexedDB). No accounts, no servers, no real
 ## Features
 - **Profiles** (up to 6) protected by a parent PIN. Each kid picks one of 14 mascots, a dark or cream theme, an accent color, a shop name and a currency.
 - **Items**: photo from camera or gallery, name, price, currency, category, discount (-10% to -50%), quantity. Restock costs cash.
-- **Customers**: create your own (name, mascot, hat, color, personality). Each has a wallet that refills daily.
+- **Customers**: create your own (name, mascot, hat, color, personality). Each has a hidden daily budget (never shown as a number, different every day) and a mood face that tells how ready they are to spend.
 - **Storefront**: search, categories, favorites, product pages, **Add to cart**, cart with quantities, coupon codes, checkout.
-- **Math moment**: the customer pays with a bill and the seller gives the right change (bonus XP, can be skipped).
+- **Shop maths**: the cart hides the total. The kid adds up the prices, then gives the right change. Parents choose per kid: *No math*, *Easy* (sum of items) or *Normal* (total after a coupon). Bonus XP, math stats in the Parents panel.
 - **Cash**: every sale adds the real value of the order to the shop's cash.
 - **Daily sales** (tap the cash pill): revenue, orders, items sold, 7-day chart, and orders with a status flow *Ordered > Packed > Shipped > Delivered*. Delivery brings a star review and sometimes a tip.
-- **Game**: levels, daily missions, badges, leaderboard between profiles, shop decorations (sign, poster, counter, pet, plant), shop themes that unlock with level, an Open/Closed sign, and sound effects (with a mute button).
-- **Phone back button**: closes dialogs, goes back one screen, and asks "Leave the shop?" before leaving by accident.
+- **Game**: levels, daily missions, badges, leaderboard between profiles, shop decorations (sign, poster, counter, pet, plant), **10 shop themes** that unlock with level (Classic, Ocean, Candy, Winter, Space, Pirate, Arcade, Jungle, Souk, Sunset), each with its own wallpaper, plus a theme studio (wallpaper on/off, custom awning color), an Open/Closed sign, and sound effects (with a mute button).
+- **Phone back button**: closes dialogs, goes back one screen. In the shop it offers *Stay / Back to profiles / Exit the app*; on the profiles screen, pressing back twice leaves the app.
+- **Any screen**: phones, tablets, landscape and rotation. On wide screens the cart sits beside the shelf.
+- **Money** is kept in each shop's own currency (no hidden conversions), and kids can type Arabic digits.
 - **Parents**: progress summary per kid, exchange rates, change PIN, backup and restore to a file.
 - Works offline after the first visit.
 
@@ -27,7 +29,7 @@ Everything is stored on the device (IndexedDB). No accounts, no servers, no real
 - **iPhone / iPad (Safari):** open the link, tap **Share**, then **Add to Home Screen**.
 
 ## Updating the app
-Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v3`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
+Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v5`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
 
 ## Files
 `index.html`, `style.css`, `app.js` (screens and game logic), `db.js` (storage), `i18n.js` (English and Arabic text), `sfx.js` (sounds), `mascots.js`, `data.js` (catalogs for decor, missions, badges), `sw.js`, `manifest.webmanifest`, and the icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
