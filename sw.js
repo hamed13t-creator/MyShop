@@ -1,5 +1,5 @@
 // Bump VERSION each time you update the app so phones fetch the new files.
-const VERSION = 'myshop-v4';
+const VERSION = 'myshop-v5';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'db.js', 'i18n.js', 'sfx.js', 'mascots.js', 'data.js',
   'manifest.webmanifest', 'icon-192.png', 'icon-512.png',

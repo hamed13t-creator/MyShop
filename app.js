@@ -83,6 +83,7 @@ function applyTheme(theme, accent) {
   const m = document.querySelector('meta[name=theme-color]');
   if (m) m.content = theme === 'dark' ? '#1B1F3B' : '#FFF6E5';
 }
+const feat = (p, k) => { p = p || S.cur; if (!p) return false; if (p.ft && k in p.ft) return !!p.ft[k]; return (PRESET[p.lvl] || PRESET.explorer).includes(k); };
 const curCode = () => (S.cur && S.cur.currency) || 'USD';
 const rateOf = c => S.rates[c] || 1;
 /* All money is stored in the shop's own currency, rounded to its decimals (no hidden USD base, so no drift). */
@@ -154,10 +155,11 @@ function normProfile(p) {
   if (p.cash == null) p.cash = p.coins != null ? p.coins : 20;
   delete p.coins;
   p.open = p.open !== false;
-  p.mathLvl = p.mathLvl || 'easy';
+  if (!p.lvl) p.lvl = { off: 'starter', easy: 'explorer', normal: 'merchant' }[p.mathLvl] || 'explorer';
+  delete p.mathLvl; p.ft = p.ft || {}; p.hist = p.hist || [];
   p.owned = p.owned || []; p.eq = p.eq || {}; p.skin = p.skin || 'default';
   p.coupons = p.coupons || []; p.badges = p.badges || []; p.seq = p.seq || 0; p.xp = p.xp || 0;
-  p.st = Object.assign({ rev: 0, sold: 0, orders: 0, delivered: 0, five: 0, math: 0, custs: 0, restock: 0, decor: 0, rsum: 0, rcount: 0, mq: 0 }, p.st || {});
+  p.st = Object.assign({ rev: 0, sold: 0, orders: 0, delivered: 0, five: 0, math: 0, custs: 0, restock: 0, decor: 0, rsum: 0, rcount: 0, mq: 0, goals: 0, exch: 0 }, p.st || {});
   return p;
 }
 const saveP = () => DB.put('profiles', S.cur);
@@ -172,7 +174,7 @@ function ensureMissions(p) {
   if (!p.ms || p.ms.day !== d) {
     let h = 7;
     for (const ch of d + p.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-    const a = MISSIONS.slice();
+    const a = MISSIONS.filter(m => m.type !== 'math' || feat(p, 'sum') || feat(p, 'change') || feat(p, 'exch'));
     for (let i = a.length - 1; i > 0; i--) { h = (h * 1103515245 + 12345) >>> 0; const j = h % (i + 1); const x = a[i]; a[i] = a[j]; a[j] = x; }
     p.ms = { day: d, list: a.slice(0, 3).map(m => ({ id: m.id, prog: 0, claimed: false })) };
   }
@@ -190,6 +192,7 @@ function track(type, n) {
 }
 function checkBadges() {
   const p = S.cur;
+  if (p.goal && !p.goal.done && p.cash >= p.goal.amt) { p.goal.done = true; p.st.goals++; setTimeout(() => { sfx.up(); toast('🏆 ' + t('goalDone')); }, 500); }
   for (const b of BADGES) {
     if (!p.badges.includes(b.id) && b.test(p)) {
       p.badges.push(b.id);
@@ -203,8 +206,15 @@ const avgPrice = () => S.products.length ? S.products.reduce((a, x) => a + unitL
 function dayRand(c, day) { let h = 7; for (const ch of c.id + day) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return (h % 1000) / 1000; }
 function budgetFor(c, day) {
   const base = (PMULT[c.pers] || 4) * avgPrice();          // about 3-6 average items, +/- a daily random mood
-  return nice(Math.max(base * (0.55 + dayRand(c, day) * 0.9), 2 * (minPrice() || lp(1))));
+  const ev = todayEvent(S.cur);
+  return nice(Math.max(base * (0.55 + dayRand(c, day) * 0.9) * (ev ? ev.m : 1), 2 * (minPrice() || lp(1))));
 }
+function todayEvent(p) {         // Tycoon: a daily surprise that changes how much customers spend
+  if (!p || !feat(p, 'event')) return null;
+  let h = 11; for (const ch of dkey() + p.id) h = (h * 33 + ch.charCodeAt(0)) >>> 0;
+  return h % 10 < 4 ? EVENTS[h % EVENTS.length] : null;
+}
+const costOf = x => Math.max(minUnit(), rnd(x.pr * 0.5));      // wholesale cost of one item = half the price
 const minPrice = () => { const a = S.products.filter(x => x.qty > 0).map(unitLocal); return a.length ? Math.min(...a) : 0; };
 const canShop = c => c.budget >= minPrice() && minPrice() > 0;
 function mood(c) {
@@ -284,12 +294,14 @@ function pickerView() {
     '<button class="pcard add" data-act="newProfile">' + ic('plus', 34) + '<b>' + t('addProfile') + '</b></button></div>' + installBlock();
 }
 
+const lvlGrid = (cur, act, id) => '<div class="lvls">' + LEVELS.map(k => '<button class="' + (cur === k ? 'sel' : '') + '" data-act="' + act + '" data-v="' + k + '"' + (id ? ' data-id="' + id + '"' : '') + '>' + t('lvl_' + k) + '<small>' + t('lvlAge_' + k) + '</small></button>').join('') + '</div>';
 function pformView() {
   const d = S.draft;
   return head(d.id ? t('customize') : t('addProfile'), null, 'cancelForm') +
     '<div class="hero">' + mas(d.mascot, 96) + '</div>' +
     '<label>' + t('name') + '<input id="f_name" class="inp" maxlength="20" value="' + esc(d.name) + '"></label>' +
     '<label>' + t('shopName') + '<input id="f_shop" class="inp" maxlength="28" value="' + esc(d.shopName) + '"></label>' +
+    (d.id ? '' : '<label>' + t('lvlPick') + '</label>' + lvlGrid(d.lvl || 'explorer', 'pickLvl', '')) +
     '<label>' + t('chooseBuddy') + '</label><div class="mgrid">' + MASCOTS.map(k => '<button class="mc ' + (d.mascot === k ? 'sel' : '') + '" data-act="pickMascot" data-k="' + k + '">' + mas(k, 52) + '</button>').join('') + '</div>' +
     '<label>' + t('theme') + '</label><div class="seg"><button class="' + (d.theme === 'dark' ? 'sel' : '') + '" data-act="pickTheme" data-v="dark">' + ic('moon', 16) + ' ' + t('dark') + '</button><button class="' + (d.theme === 'cream' ? 'sel' : '') + '" data-act="pickTheme" data-v="cream">' + ic('sun', 16) + ' ' + t('cream') + '</button></div>' +
     '<label>' + t('color') + '</label><div class="sw">' + ACCENTS.map(c => '<button class="' + (d.accent === c ? 'sel' : '') + '" style="background:' + c + '" data-act="pickAccent" data-v="' + c + '" aria-label="' + c + '"></button>').join('') + '</div>' +
@@ -310,7 +322,7 @@ function productCard(x) {
     '</div><div class="pname">' + catEmoji(x.cat) + ' ' + esc(x.name) + '</div><div class="prices">' + priceTag(x) + '</div></button>';
 }
 
-const restockCost = x => Math.max(minUnit(), rnd(x.pr * 0.5 * RESTOCK_N));   // wholesale: half price
+const restockCost = x => Math.max(minUnit(), rnd(costOf(x) * RESTOCK_N));
 function sceneHtml(p) {
   const signEq = p.eq.sign, items = SLOTS.filter(s => s !== 'sign' && p.eq[s]).map(s => (DECOR.find(d => d.id === p.eq[s]) || {}).e).filter(Boolean);
   return '<div class="shopwrap" data-skin="' + p.skin + '"' + (p.awn ? ' style="--a1:' + p.awn + '"' : '') + '><div class="awning"></div><div class="scene"><h1 class="shoptitle ' + (signEq || '') + '">' + esc(p.shopName) + '</h1>' +
@@ -321,6 +333,7 @@ function shopView() {
   const p = S.cur, pr = (p.xp % XPL) * (100 / XPL), open = p.open !== false;
   const rating = p.st.rcount ? (p.st.rsum / p.st.rcount).toFixed(1) : '–';
   const todo = S.orders.filter(o => o.status !== 'delivered').length;
+  const ev = todayEvent(p);
   const tool = (act, icn, label, badge) => '<button class="tool" data-act="' + act + '">' + ic(icn, 24) + '<span>' + label + '</span>' + (badge ? '<i class="nb">' + badge + '</i>' : '') + '</button>';
   return '<header class="top"><button class="ibtn" data-act="back" aria-label="' + t('back') + '">' + back() + '</button>' +
     '<div class="me">' + mas(p.mascot, 34) + '<b>' + esc(p.name) + '</b></div>' +
@@ -331,11 +344,20 @@ function shopView() {
     '<span class="pill">⭐ ' + rating + '</span>' +
     '<button class="opensign ' + (open ? 'open' : 'closed') + '" data-act="toggleOpen">' + (open ? t('open') : t('closed')) + '</button></div>' +
     '<div class="xp"><i style="width:' + pr + '%"></i></div>' + sceneHtml(p) +
-    '<div class="tools">' + tool('custs', 'users', t('customers')) + tool('orders', 'truck', t('orders'), todo || '') + tool('goals', 'target', t('goals')) + tool('decor', 'palette', t('decor')) + tool('deals', 'tag', t('deals')) + '</div>' +
+    '<div class="tools">' + tool('custs', 'users', t('customers')) + tool('orders', 'truck', t('orders'), todo || '') + tool('goals', 'target', t('goals')) + tool('decor', 'palette', t('decor')) + (feat(p, 'coupons') ? tool('deals', 'tag', t('deals')) : '') + (feat(p, 'exch') ? tool('exch', 'coin', t('exchange')) : '') + '</div>' +
+    (ev ? '<div class="evt">' + ev.e + ' ' + t('ev_' + ev.id) + '</div>' : '') + goalHtml(p) +
     (S.products.length ? '<div class="shelf">' + S.products.map(productCard).join('') + '</div>' : '<div class="empty">' + ic('box', 48) + '<p>' + t('emptyShop') + '</p></div>') +
     '<div class="dock"><button class="btn ghost" data-act="custs">' + ic('users') + ' ' + t('customers') + '</button><button class="btn" data-act="addItem">' + ic('plus') + ' ' + t('addItem') + '</button></div>';
 }
 
+function goalHtml(p) {
+  if (!feat(p, 'goal')) return '';
+  const g = p.goal;
+  if (!g) return '<button class="goalc" style="width:100%;color:var(--text);font-weight:800;cursor:pointer" data-act="goalSet">🎯 ' + t('goalSet') + '</button>';
+  const pc = Math.min(100, Math.round(p.cash / g.amt * 100));
+  return '<div class="goalc"><div class="row" style="margin:0"><b style="flex:1">' + (g.done ? '🏆 ' : '🎯 ') + esc(g.name) + '</b><span class="muted small">' + fmt(Math.min(p.cash, g.amt)) + ' / ' + fmt(g.amt) + '</span></div>' +
+    '<div class="xp"><i style="width:' + pc + '%"></i></div>' + (g.done ? '<button class="btn sm" style="margin-top:8px" data-act="goalSet">' + t('goalNew') + '</button>' : '') + '</div>';
+}
 function itemView() {
   const d = S.idraft, cur = d.cur || S.cur.currency, edit = !!d.id;
   return head(edit ? t('editItem') : t('addItem'), null, 'cancelItem') +
@@ -427,47 +449,71 @@ function cartLines() {
 }
 function cartTotals() {
   const ls = cartLines(), cur = curCode();
-  const sub = rnd(ls.reduce((s, l) => s + l.unit * l.qty, 0), cur), pct = S.coupon ? S.coupon.pct : 0;
-  const disc = rnd(sub * pct / 100, cur);
-  return { ls, sub, disc, pct, total: rnd(sub - disc, cur), count: ls.reduce((s, l) => s + l.qty, 0) };
+  const sub = rnd(ls.reduce((s, l) => s + l.unit * l.qty, 0), cur), pct = S.coupon && feat(S.cur, 'coupons') ? S.coupon.pct : 0;
+  const disc = rnd(sub * pct / 100, cur), fee = ls.length && feat(S.cur, 'fee') ? lp(1.5) : 0;
+  const cost = rnd(ls.reduce((s, l) => s + costOf(l.x) * l.qty, 0), cur);
+  return { ls, sub, disc, pct, fee, cost, total: rnd(sub - disc + fee, cur), count: ls.reduce((s, l) => s + l.qty, 0) };
 }
 function cartHtml() {
   const T = cartTotals();
   if (!T.ls.length) return '<h2>' + t('yourCart') + '</h2><div class="empty">' + ic('cart', 44) + '<p>' + t('cartEmpty') + '</p></div><button class="btn big" data-act="closeSheet">' + t('keepShopping') + '</button>';
-  const mathOn = S.cur.mathLvl !== 'off';
+  const mathOn = feat(S.cur, 'sum');
   return '<h2>' + t('yourCart') + '</h2>' + T.ls.map(l => '<div class="line"><div class="thumb">' + imgOrPh(l.x, 20) + '</div><div class="lt"><b>' + esc(l.x.name) + '</b><span class="muted small">' + fmt(l.unit) + '</span></div>' +
     '<div class="stp"><button class="ibtn" data-act="qtyMinus" data-id="' + l.x.id + '" aria-label="-">' + ic('minus', 16) + '</button><b>' + l.qty + '</b><button class="ibtn" data-act="qtyPlus" data-id="' + l.x.id + '" aria-label="+">' + ic('plus', 16) + '</button></div>' +
     '<b class="lp">' + fmt(rnd(l.unit * l.qty)) + '</b></div>').join('') +
-    '<div class="row" style="margin-top:12px"><input id="cpn" class="inp" style="flex:1" placeholder="' + t('coupon') + '" value="' + (S.coupon ? esc(S.coupon.code) : '') + '"><button class="btn ghost" style="flex:none" data-act="applyCoupon">' + t('apply') + '</button></div>' +
+    (feat(S.cur, 'coupons') ? '<div class="row" style="margin-top:12px"><input id="cpn" class="inp" style="flex:1" placeholder="' + t('coupon') + '" value="' + (S.coupon ? esc(S.coupon.code) : '') + '"><button class="btn ghost" style="flex:none" data-act="applyCoupon">' + t('apply') + '</button></div>' : '') +
     (S.cpnErr ? '<p class="err" style="margin:4px 0">' + S.cpnErr + '</p>' : '') +
-    (mathOn ? '<p class="center muted" style="margin:12px 0 0">🧮 ' + t('addUpHint') + (T.pct ? ' · ' + t('coupon') + ' -' + T.pct + '%' : '') + '</p>' :
+    (mathOn ? '<p class="center muted" style="margin:12px 0 0">🧮 ' + t('addUpHint') + (T.pct ? ' · ' + t('coupon') + ' -' + T.pct + '%' : '') + (T.fee ? ' · ' + t('fee') : '') + '</p>' :
       '<div class="tot"><span>' + t('subtotal') + '</span><b>' + fmt(T.sub) + '</b></div>' +
       (T.disc ? '<div class="tot"><span>' + t('coupon') + ' (-' + T.pct + '%)</span><b>-' + fmt(T.disc) + '</b></div>' : '') +
+      (T.fee ? '<div class="tot"><span>' + t('fee') + '</span><b>+' + fmt(T.fee) + '</b></div>' : '') +
       '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(T.total) + '</b></div>') +
     '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('keepShopping') + '</button><button class="btn" data-act="checkout">' + ic(mathOn ? 'target' : 'check') + ' ' + t(mathOn ? 'addUp' : 'checkout') + '</button></div>';
 }
 const focusSoon = sel => setTimeout(() => { const i = $(sel); if (i) i.focus(); }, 80);
-function toChange() { const P = S.pay; P.stage = 'change'; P.tries = 0; P.reveal = false; P.err = ''; sheet(payHtml()); focusSoon('#chg'); }
 function niceUp(v) {
   for (let e = 1; e <= 1e8; e *= 10) for (const m of [e, 2 * e, 5 * e]) if (m > v) return m;
   return Math.ceil(v) + 1;
 }
+/* checkout is a short chain of stages: sum (add up), change (or 'auto' = the app shows it), profit (Tycoon) */
+function enterStage(i) {
+  const P = S.pay; P.i = i; P.stage = P.stages[i]; P.tries = 0; P.reveal = false; P.err = '';
+  P.target = P.stage === 'sum' ? (P.hard ? P.total : P.sub) : P.stage === 'change' ? rnd(P.bill - P.total) : P.stage === 'profit' ? rnd(P.total - P.cost) : null;
+  sheet(payHtml());
+  if (P.stage !== 'auto') focusSoon('#ans');
+}
+function nextStage() {
+  const P = S.pay;
+  if (P.i + 1 >= P.stages.length) return finishOrder(P.ok, P.asked, P.res);
+  enterStage(P.i + 1);
+}
 function payHtml() {
-  const P = S.pay, c = S.shopper, change = rnd(P.bill - P.total);
-  if (P.stage === 'sum') {
-    const lines = cartLines().map(l => '<div class="tot"><span>' + esc(l.x.name) + ' ×' + l.qty + ' <small class="muted">(' + fmt(l.unit) + ')</small></span></div>').join('');
-    return '<h2>🧮 ' + t('addUp') + '</h2><p class="center muted">' + t(P.hard ? 'sumQ2' : 'sumQ') + '</p>' + lines +
-      (P.hard && S.coupon ? '<div class="tot"><span>' + esc(S.coupon.code) + '</span><b>-' + S.coupon.pct + '%</b></div>' : '') +
-      (P.reveal ? '<div class="note ok">' + fmt(P.target) + '</div><button class="btn big" data-act="sumNext">' + t('next') + '</button>' :
-        '<input id="ans" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="?" autocomplete="off"><p class="err" id="anserr">' + (P.err || '') + '</p>' +
-        '<div class="row"><button class="btn ghost" data-act="sumSkip">' + t('skip') + '</button><button class="btn" data-act="sumCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
+  const P = S.pay, c = S.shopper, st = P.stage;
+  const tl = (k, v, cls) => '<div class="tot ' + (cls || '') + '"><span>' + k + '</span><b>' + v + '</b></div>';
+  const coupon = P.pct ? tl(t('coupon') + ' (-' + P.pct + '%)', '', '') : '';
+  if (st === 'auto') {
+    return '<h2>' + t('checkout') + '</h2>' + (P.disc ? tl(t('coupon'), '-' + fmt(P.disc)) : '') + (P.fee ? tl(t('fee'), '+' + fmt(P.fee)) : '') + tl(t('total'), fmt(P.total), 'big') +
+      '<p class="center muted">' + t('customerPays', { n: esc(c.name) }) + '</p><div class="note">' + fmt(P.bill) + '</div>' +
+      '<p class="center" style="font-size:18px">' + t('yourChange') + '</p><div class="note ok">' + fmt(rnd(P.bill - P.total)) + '</div>' +
+      '<button class="btn big" data-act="ansNext">' + t('next') + '</button>';
   }
-  return '<h2>' + t('checkout') + '</h2>' + (P.disc && !P.hard ? '<div class="tot"><span>' + t('coupon') + '</span><b>-' + fmt(P.disc) + '</b></div>' : '') + '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(P.total) + '</b></div>' +
-    '<p class="center muted">' + t('customerPays', { n: esc(c.name) }) + '</p><div class="note">' + fmt(P.bill) + '</div>' +
-    '<p class="center" style="font-size:18px">' + t('giveChange') + '</p>' +
-    (P.reveal ? '<div class="note ok">' + fmt(change) + '</div><button class="btn big" data-act="payDone">' + t('next') + '</button>' :
-      '<input id="chg" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="?" autocomplete="off"><p class="err" id="chgerr">' + (P.err || '') + '</p>' +
-      '<div class="row"><button class="btn ghost" data-act="paySkip">' + t('skip') + '</button><button class="btn" data-act="payCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
+  let head2 = '', ctx = '', q = '';
+  if (st === 'sum') {
+    head2 = '🧮 ' + t('addUp'); q = t(P.hard ? 'sumQ2' : 'sumQ');
+    ctx = cartLines().map(l => '<div class="tot"><span>' + esc(l.x.name) + ' ×' + l.qty + ' <small class="muted">(' + fmt(l.unit) + ')</small></span></div>').join('') +
+      (P.hard && P.pct ? tl(t('coupon'), '-' + P.pct + '%') : '') + (P.hard && P.fee ? tl(t('fee'), '+' + fmt(P.fee)) : '');
+  } else if (st === 'change') {
+    head2 = t('checkout'); q = t('giveChange');
+    ctx = (P.disc ? tl(t('coupon'), '-' + fmt(P.disc)) : '') + (P.fee ? tl(t('fee'), '+' + fmt(P.fee)) : '') + tl(t('total'), fmt(P.total), 'big') +
+      '<p class="center muted">' + t('customerPays', { n: esc(c.name) }) + '</p><div class="note">' + fmt(P.bill) + '</div>';
+  } else {
+    head2 = '📈 ' + t('profitQT'); q = t('profitQ');
+    ctx = tl(t('soldFor'), fmt(P.total)) + tl(t('itemsCost'), fmt(P.cost));
+  }
+  return '<h2>' + head2 + '</h2>' + ctx + '<p class="center" style="font-size:18px">' + q + '</p>' +
+    (P.reveal ? '<div class="note ok">' + fmt(P.target) + '</div><button class="btn big" data-act="ansNext">' + t('next') + '</button>' :
+      '<input id="ans" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="?" autocomplete="off"><p class="err">' + (P.err || '') + '</p>' +
+      '<div class="row"><button class="btn ghost" data-act="ansSkip">' + t('skip') + '</button><button class="btn" data-act="ansCheck">' + ic('check') + ' ' + t('check') + '</button></div>');
 }
 function doneHtml(o, math) {   // math = number of correct answers
   return '<div class="center sold"><div class="okwrap"><div class="okbig">' + ic('check', 46) + '</div>' + [-60, -20, 20, 60].map((x, i) => '<span class="coin" style="--dx:' + x + 'px;--d:' + (0.3 + i * 0.1) + 's"></span>').join('') + '</div>' +
@@ -483,6 +529,8 @@ function orderRow(o) {
 function ordersView() {
   const today = dkey(), day = S.day || today;
   const dayOrders = S.orders.filter(o => o.day === day);
+  const ocost = o => o.cost != null ? o.cost : rnd(o.items.reduce((a, i) => a + rnd(i.unit * 0.5, o.cur) * i.qty, 0), o.cur);
+  const profit = dayOrders.reduce((s, o) => s + inCur(o.total - ocost(o), o.cur), 0);
   const rev = dayOrders.reduce((s, o) => s + inCur(o.total, o.cur), 0), items = dayOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
   const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(day, i - 6));
   const sums = days.map(k => S.orders.filter(o => o.day === k).reduce((s, o) => s + inCur(o.total, o.cur), 0)), mx = Math.max(...sums, 0.0001);
@@ -490,7 +538,7 @@ function ordersView() {
   const done = dayOrders.filter(o => o.status === 'delivered').sort((a, b) => b.ts - a.ts);
   return head(t('dailySales'), null, 'toShop') +
     '<div class="datenav"><button class="ibtn" data-act="dayPrev" aria-label="' + t('prev') + '"><span class="flip">' + ic('chev-l') + '</span></button><b>' + (day === today ? t('today') + ' · ' : '') + dlabel(day) + '</b><button class="ibtn" data-act="dayNext" aria-label="' + t('next') + '" ' + (day >= today ? 'style="opacity:.35"' : '') + '><span class="flip">' + ic('chev-r') + '</span></button></div>' +
-    '<div class="metrics"><div class="metric"><b>' + money(rev) + '</b><span>' + t('revenue') + '</span></div><div class="metric"><b>' + dayOrders.length + '</b><span>' + t('orders') + '</span></div><div class="metric"><b>' + items + '</b><span>' + t('itemsSold') + '</span></div></div>' +
+    '<div class="metrics"><div class="metric"><b>' + money(rev) + '</b><span>' + t('revenue') + '</span></div><div class="metric"><b>' + dayOrders.length + '</b><span>' + t('orders') + '</span></div><div class="metric"><b>' + items + '</b><span>' + t('itemsSold') + '</span></div>' + (feat(S.cur, 'profit') ? '<div class="metric"><b style="color:' + (profit < 0 ? '#F87171' : '#4ADE80') + '">' + money(profit) + '</b><span>' + t('profit') + '</span></div>' : '') + '</div>' +
     '<div class="bars">' + days.map((k, i) => '<button class="bar ' + (k === day ? 'sel' : '') + '" data-act="pickDay" data-v="' + k + '"><i style="height:' + Math.max(3, Math.round(sums[i] / mx * 70)) + 'px"></i><span>' + dlabel(k, { weekday: 'narrow' }) + '</span></button>').join('') + '</div>' +
     '<h2>' + t('toProcess') + ' (' + todo.length + ')</h2>' + (todo.length ? todo.map(orderRow).join('') : '<p class="muted small">' + t('allDone') + '</p>') +
     '<h2>' + t('delivered') + '</h2>' + (done.length ? done.map(orderRow).join('') : '<p class="muted small">' + t('noOrders') + '</p>');
@@ -502,7 +550,9 @@ function orderHtml(o) {
     '<div class="tl">' + ST.map((s, i) => '<div class="step ' + (i <= idx ? 'on' : '') + '"><span class="dot">' + ic(ST_ICON[s], 18) + '</span><small>' + t('st_' + s) + '</small></div>').join('') + '</div>' +
     o.items.map(i => '<div class="tot"><span>' + esc(i.name) + ' ×' + i.qty + '</span><b>' + fmt(rnd(i.unit * i.qty, o.cur), o.cur) + '</b></div>').join('') +
     (o.disc ? '<div class="tot"><span>' + esc(o.code) + ' (-' + o.pct + '%)</span><b>-' + fmt(o.disc, o.cur) + '</b></div>' : '') +
+    (o.fee ? '<div class="tot"><span>' + t('fee') + '</span><b>+' + fmt(o.fee, o.cur) + '</b></div>' : '') +
     '<div class="tot big"><span>' + t('total') + '</span><b>' + fmt(o.total, o.cur) + '</b></div>' +
+    (feat(S.cur, 'profit') && o.cost != null ? '<div class="tot muted"><span>' + t('itemsCost') + '</span><b>' + fmt(o.cost, o.cur) + '</b></div><div class="tot"><span>' + t('profit') + '</span><b>' + fmt(rnd(o.total - o.cost, o.cur), o.cur) + '</b></div>' : '') +
     (rv ? '<div class="review">' + stars(rv.stars) + '<p>“' + t('rv' + rv.stars + '_' + rv.k) + '”</p>' + (o.tip ? '<p class="tag">+' + money(o.tip, o.cur) + ' ' + t('tip') + '</p>' : '') + '</div>' : '') +
     (o.status !== 'delivered' ? '<button class="btn big" data-act="advance" data-id="' + o.id + '">' + ic(ST_ICON[ST[idx + 1]]) + ' ' + t('adv_' + o.status) + '</button>' : '') +
     '<button class="btn ghost big" data-act="closeSheet">' + t('done') + '</button>';
@@ -552,9 +602,38 @@ function dealsHtml() {
 }
 
 /* ----- parent panel ----- */
+function newExchange() {
+  const shop = curCode(), others = CURRENCIES.filter(c => c !== shop), cur = pick(others);
+  const amt = nice(lp(pick([5, 10, 20, 25, 40, 50, 100])));
+  S.ex = { cur, amt, ans: rnd(amt / rateOf(shop) * rateOf(cur), cur), tries: 0, done: false, show: false, err: '', reward: false };
+}
+function exchHtml() {
+  const E = S.ex, shop = curCode();
+  return '<h2>💱 ' + t('exchange') + '</h2><p class="center muted">' + t('exQ', { a: fmt(E.amt), c: E.cur }) + '</p>' +
+    '<div class="tot"><span>1 USD</span><b>' + rateOf(shop) + ' ' + shop + '</b></div><div class="tot"><span>1 USD</span><b>' + rateOf(E.cur) + ' ' + E.cur + '</b></div>' +
+    (E.done ? '<div class="note ' + (E.show ? '' : 'ok') + '">' + fmt(E.ans, E.cur) + '</div>' + (E.reward ? '<p class="center tag">+' + money(lp(1)) + ' 🎉</p>' : '') +
+      '<button class="btn big" data-act="exNext">' + t('next') + '</button><button class="btn ghost big" data-act="closeSheet">' + t('done') + '</button>' :
+      '<input id="xans" class="inp pin" style="letter-spacing:2px" inputmode="decimal" placeholder="' + E.cur + '?" autocomplete="off"><p class="err">' + (E.err || '') + '</p>' +
+      '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('cancel') + '</button><button class="btn" data-act="exAnswer">' + ic('check') + ' ' + t('check') + '</button></div>');
+}
+function lvlHint(p) {              // a suggestion only: the parent decides
+  if ((p.hist || []).length < 20) return '';
+  const acc = p.hist.reduce((a, b) => a + b, 0) / p.hist.length, i = LEVELS.indexOf(p.lvl);
+  if (acc >= 0.85 && i < LEVELS.length - 1) return 'up';
+  if (acc < 0.4 && i > 0) return 'down';
+  return '';
+}
+function lvlHtml(p) {
+  const hint = lvlHint(p), acc = (p.hist || []).length ? Math.round(p.hist.reduce((a, b) => a + b, 0) / p.hist.length * 100) : null;
+  return '<h2>' + esc(p.name) + ' · ' + t('lvlTitle') + '</h2>' + (hint ? '<div class="hintbox">💡 ' + t('hint_' + hint) + '</div>' : '') +
+    (acc != null ? '<p class="muted small">' + t('lastAnswers', { n: acc }) + '</p>' : '') +
+    lvlGrid(p.lvl, 'setLvl', p.id) + '<p class="muted small">' + t('lvlD_' + p.lvl) + '</p>' +
+    '<h3 class="sech">' + t('lvlFeatures') + '</h3><div class="ftl">' + FEATS.map(k => '<button class="ft ' + (feat(p, k) ? 'on' : '') + '" data-act="toggleFt" data-id="' + p.id + '" data-k="' + k + '">' + (feat(p, k) ? '✓ ' : '') + t('ft_' + k) + '</button>').join('') + '</div>' +
+    '<button class="btn ghost big" data-act="resetFt" data-id="' + p.id + '">' + t('lvlReset') + '</button><button class="btn big" data-act="closeSheet">' + t('done') + '</button>';
+}
 function parentView() {
   const rows = S.profiles.map(p => '<div class="prow">' + mas(p.mascot, 40) + '<div class="gr"><b>' + esc(p.name) + '</b><div class="muted small">' + t('level', { n: level(p) }) + ' · ' + t('sold') + ': ' + p.st.sold + ' · ' + t('revenue') + ': ' + fmt(p.st.rev, p.currency) + (p.st.rcount ? ' · ⭐ ' + (p.st.rsum / p.st.rcount).toFixed(1) : '') + ' · 🧮 ' + p.st.math + '/' + p.st.mq + '</div>' +
-    '<div class="seg sm">' + ['off', 'easy', 'normal'].map(k => '<button class="' + (p.mathLvl === k ? 'sel' : '') + '" data-act="mathLvl" data-id="' + p.id + '" data-v="' + k + '">' + t('math_' + k) + '</button>').join('') + '</div></div>' +
+    '<button class="btn ghost sm" style="margin-top:8px" data-act="lvlSheet" data-id="' + p.id + '">🎓 ' + t('lvl_' + p.lvl) + ' · ' + t('lvlEdit') + (lvlHint(p) ? ' 💡' : '') + '</button></div>' +
     '<button class="ibtn red" data-act="delProfile" data-id="' + p.id + '" aria-label="' + t('delete') + '">' + ic('trash') + '</button></div>').join('');
   return head(t('parent'), null, 'parentDone') +
     '<h2>' + t('profiles') + '</h2>' + rows + '<button class="btn big" data-act="newProfile">' + ic('plus') + ' ' + t('addProfile') + '</button>' +
@@ -576,7 +655,7 @@ function render() {
 const setView = v => { S.view = v; render(); };
 
 /* ---------- drafts ---------- */
-const newDraft = () => ({ id: null, name: '', shopName: '', mascot: 'fox', theme: S.theme, accent: ACCENTS[0], currency: 'USD' });
+const newDraft = () => ({ lvl: 'explorer', id: null, name: '', shopName: '', mascot: 'fox', theme: S.theme, accent: ACCENTS[0], currency: 'USD' });
 function syncDraft() {
   const n = $('#f_name');
   if (n) { S.draft.name = n.value; S.draft.shopName = $('#f_shop').value; S.draft.currency = $('#f_cur').value; }
@@ -613,7 +692,7 @@ async function openProfile(id) {
 }
 
 /* ---------- orders: create, deliver ---------- */
-async function finishOrder(ok, asked) {      // ok = correct math answers, asked = questions asked
+async function finishOrder(ok, asked, res) {      // ok = correct math answers, asked = questions asked
   if (S.ordering) return;
   const p = S.cur, c = S.shopper, T = cartTotals(), cur = curCode();
   if (!T.count) return;
@@ -624,7 +703,7 @@ async function finishOrder(ok, asked) {      // ok = correct math answers, asked
     const o = {
       id: uid(), pid: p.id, n: p.seq, cid: c.id, cname: c.name, cmas: c.mascot, chat: c.hat, ccol: c.color, pers: c.pers,
       items: T.ls.map(l => ({ id: l.x.id, name: l.x.name, qty: l.qty, unit: l.unit })),
-      sub: T.sub, disc: T.disc, pct: T.pct, code: S.coupon ? S.coupon.code : '', total: T.total, cur, xp,
+      sub: T.sub, disc: T.disc, pct: T.pct, code: S.coupon ? S.coupon.code : '', total: T.total, cur, xp, cost: T.cost, fee: T.fee,
       status: 'ordered', day: dkey(), ts: Date.now(), review: null, tip: 0, tipc: 1
     };
     for (const l of T.ls) { l.x.qty -= l.qty; await DB.put('products', l.x); }
@@ -632,7 +711,7 @@ async function finishOrder(ok, asked) {      // ok = correct math answers, asked
     await DB.put('customers', c);
     p.cash = rnd(p.cash + T.total);              // the real value of the purchase goes into the cash
     p.st.rev = rnd(p.st.rev + T.total); p.st.sold += T.count; p.st.orders++;
-    p.st.math += ok; p.st.mq += asked;
+    p.st.math += ok; p.st.mq += asked; p.hist = (p.hist || []).concat(res || []).slice(-20);
     addXp(xp);
     if (ok) track('math', ok);
     track('items', T.count); track('order', 1); if (T.count >= 3) track('big', 1);
@@ -786,6 +865,7 @@ const ACT = {
   home() { S.cur = null; S.cart = []; applyTheme(S.theme, ACCENTS[0]); setView('picker'); },
   toShop() { closeSheet(); S.cart = []; S.coupon = null; S.shopper = null; setView('shop'); },
   customize() { S.draft = Object.assign({}, S.cur); S.back = 'shop'; setView('pform'); },
+  pickLvl(d) { syncDraft(); S.draft.lvl = d.v; render(); },
   pickMascot(d) { syncDraft(); S.draft.mascot = d.k; render(); },
   pickTheme(d) { syncDraft(); S.draft.theme = d.v; applyTheme(d.v, S.draft.accent); render(); },
   pickAccent(d) { syncDraft(); S.draft.accent = d.v; applyTheme(S.draft.theme, d.v); render(); },
@@ -798,7 +878,7 @@ const ACT = {
     const d = S.draft, name = d.name.trim();
     if (!name) { toast(t('nameReq')); sfx.err(); return; }
     const old = d.id ? S.profiles.find(x => x.id === d.id) : null, oldCur = old && old.currency;
-    const rec = normProfile(Object.assign(old || { id: uid(), cash: Math.round(20 * rateOf(d.currency) / 5) * 5, xp: 0, created: Date.now(), m3: true }, {
+    const rec = normProfile(Object.assign(old || { id: uid(), cash: Math.round(20 * rateOf(d.currency) / 5) * 5, xp: 0, created: Date.now(), m3: true, lvl: d.lvl || 'explorer' }, {
       name, shopName: (d.shopName || '').trim() || t('shopOf', { n: name }), mascot: d.mascot, theme: d.theme, accent: d.accent, currency: d.currency
     }));
     if (old && oldCur !== d.currency) {            // the shop changes currency: convert everything it owns
@@ -811,7 +891,34 @@ const ACT = {
     sfx.coin();
     await openProfile(rec.id);
   },
-  async mathLvl(d) { const p = S.profiles.find(x => x.id === d.id); if (!p) return; p.mathLvl = d.v; await DB.put('profiles', p); render(); },
+  goalSet() {
+    sheet('<h2>🎯 ' + t('goalSet') + '</h2><label>' + t('goalName') + '<input id="g_name" class="inp" maxlength="24"></label><label>' + t('goalAmt') + '<input id="g_amt" class="inp" inputmode="decimal" autocomplete="off"></label>' +
+      '<div class="row"><button class="btn ghost" data-act="closeSheet">' + t('cancel') + '</button><button class="btn" data-act="goalSave">' + t('save') + '</button></div>');
+  },
+  async goalSave() {
+    const n = ($('#g_name').value || '').trim(), a = rnd(parseNum($('#g_amt').value));
+    if (!n || !(a > S.cur.cash)) { toast(t('goalBad')); sfx.err(); return; }
+    S.cur.goal = { name: n, amt: a, done: false }; sfx.coin(); await saveP(); closeSheet(); render();
+  },
+  exch() { newExchange(); sheet(exchHtml()); focusSoon('#xans'); },
+  exAnswer() {
+    const E = S.ex, v = parseNum($('#xans').value);
+    if (isNaN(v)) return;
+    const p = S.cur, ok = Math.abs(v - E.ans) <= Math.max(minUnit(E.cur), E.ans * 0.01);
+    E.tries++;
+    if (ok) {
+      E.done = true; sfx.star(); p.st.math++; p.st.mq++; p.hist = (p.hist || []).concat([1]).slice(-20);
+      const today = dkey(); if (!p.exd || p.exd.day !== today) p.exd = { day: today, n: 0 };
+      if (p.exd.n < 5) { p.exd.n++; p.cash = rnd(p.cash + lp(1)); addXp(4); E.reward = true; }
+      track('math', 1); checkBadges(); saveP(); render();
+    } else { sfx.err(); if (E.tries >= 2) { E.done = true; E.show = true; p.st.mq++; p.hist = (p.hist || []).concat([0]).slice(-20); saveP(); } else E.err = t('tryAgain'); }
+    sheet(exchHtml());
+  },
+  exNext() { newExchange(); sheet(exchHtml()); focusSoon('#xans'); },
+  lvlSheet(d) { sheet(lvlHtml(S.profiles.find(x => x.id === d.id))); },
+  async setLvl(d) { const p = S.profiles.find(x => x.id === d.id); p.lvl = d.v; p.ft = {}; await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
+  async toggleFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = p.ft || {}; p.ft[d.k] = !feat(p, d.k); await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
+  async resetFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = {}; await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
   toggleOpen() { S.cur.open = !S.cur.open; saveP(); S.cur.open ? sfx.bell() : sfx.whoosh(); toast(S.cur.open ? t('nowOpen') : t('nowClosed')); render(); },
 
   /* items */
@@ -823,6 +930,7 @@ const ACT = {
     const x = S.products.find(p => p.id === d.id), cost = restockCost(x);
     sheet('<div class="bigimg">' + imgOrPh(x, 60) + '</div><h2 style="margin:0">' + catEmoji(x.cat) + ' ' + esc(x.name) + '</h2>' +
       '<p class="prices">' + priceTag(x) + ' <span class="muted">' + t('inStock', { n: x.qty }) + '</span></p>' +
+      (feat(S.cur, 'profit') ? '<div class="tot"><span>' + t('costEach') + '</span><b>' + fmt(costOf(x)) + '</b></div><div class="tot"><span>' + t('profitEach') + '</span><b>' + fmt(rnd(unitLocal(x) - costOf(x))) + '</b></div>' : '') +
       '<button class="btn blue big" style="margin-top:4px" data-act="restock" data-id="' + x.id + '">' + ic('box') + ' ' + t('restock') + ' +' + RESTOCK_N + ' · ' + money(cost) + '</button>' +
       '<div class="row"><button class="btn ghost" data-act="editItem" data-id="' + x.id + '">' + ic('edit') + ' ' + t('edit') + '</button><button class="btn red" data-act="delItem" data-id="' + x.id + '">' + ic('trash') + ' ' + t('delete') + '</button></div>');
   },
@@ -926,12 +1034,13 @@ const ACT = {
     sfx.tick(); updateStore(); refreshCart();
   },
   applyCoupon() {
+    if (!feat(S.cur, 'coupons')) return;
     const v = ($('#cpn').value || '').trim().toUpperCase(), c = S.cur.coupons.find(x => x.code === v);
     if (c) { S.coupon = c; S.cpnErr = ''; sfx.coin(); } else { S.coupon = null; S.cpnErr = v ? t('badCoupon') : ''; if (v) sfx.err(); }
     updateStore(); refreshCart();
   },
   checkout() {
-    const T = cartTotals(), c = S.shopper, lvl = S.cur.mathLvl;
+    const T = cartTotals(), c = S.shopper, p = S.cur;
     if (!T.count) return;
     S.cartOpen = false;
     if (T.total > c.budget) {                    // the customer's budget is hidden: they just say it is too much
@@ -939,32 +1048,24 @@ const ACT = {
       sheet('<div class="center">' + avatar(c.mascot, 80, c.hat, c.color) + '<h2>' + t('cantAfford', { n: esc(c.name) }) + '</h2><p class="muted">' + t('cantHint') + '</p><button class="btn big" data-act="cart">' + ic('cart') + ' ' + t('yourCart') + '</button></div>');
       return;
     }
-    if (lvl === 'off') return finishOrder(0, 0);
-    const trivial = T.ls.length === 1 && T.count === 1 && !T.pct;
-    S.pay = { stage: trivial ? 'change' : 'sum', hard: lvl === 'normal', target: lvl === 'normal' ? T.total : T.sub, total: T.total, disc: T.disc, bill: niceUp(T.total), tries: 0, reveal: false, err: '', ok: 0, asked: 0 };
-    sheet(payHtml());
-    focusSoon(trivial ? '#chg' : '#ans');
+    const trivial = T.ls.length === 1 && T.count === 1 && !T.pct && !T.fee;
+    const stages = [];
+    if (feat(p, 'sum') && !trivial) stages.push('sum');
+    stages.push(feat(p, 'change') ? 'change' : 'auto');
+    if (feat(p, 'profitQ')) stages.push('profit');
+    S.pay = { stages, hard: feat(p, 'pct'), sub: T.sub, total: T.total, disc: T.disc, pct: T.pct, fee: T.fee, cost: T.cost, bill: niceUp(T.total), ok: 0, asked: 0, res: [] };
+    enterStage(0);
   },
-  sumCheck() {
-    const P = S.pay, v = parseNum($('#ans').value);
+  ansCheck() {
+    const P = S.pay, v = parseNum(($('#ans') || {}).value);
     if (isNaN(v)) return;
-    if (Math.abs(v - P.target) < 0.004) { sfx.star(); P.ok++; P.asked++; toChange(); return; }
+    if (Math.abs(v - P.target) < 0.004) { sfx.star(); P.ok++; P.asked++; P.res.push(1); return nextStage(); }
     P.tries++; sfx.err();
-    if (P.tries >= 2) { P.reveal = true; P.asked++; P.err = ''; } else P.err = t('tryAgain');
+    if (P.tries >= 2) { P.reveal = true; P.asked++; P.res.push(0); P.err = ''; } else P.err = t('tryAgain');
     sheet(payHtml()); focusSoon('#ans');
   },
-  sumSkip() { const P = S.pay; P.reveal = true; P.asked++; sheet(payHtml()); },
-  sumNext() { toChange(); },
-  payCheck() {
-    const P = S.pay, v = parseNum($('#chg').value), change = rnd(P.bill - P.total);
-    if (isNaN(v)) return;
-    if (Math.abs(v - change) < 0.004) { sfx.star(); P.ok++; P.asked++; return finishOrder(P.ok, P.asked); }
-    P.tries++; sfx.err();
-    if (P.tries >= 2) { P.reveal = true; P.asked++; P.err = ''; } else P.err = t('tryAgain');
-    sheet(payHtml()); focusSoon('#chg');
-  },
-  paySkip() { const P = S.pay; P.reveal = true; P.asked++; sheet(payHtml()); },
-  payDone() { return finishOrder(S.pay.ok, S.pay.asked); },
+  ansSkip() { const P = S.pay; P.reveal = true; P.asked++; P.res.push(0); sheet(payHtml()); },
+  ansNext() { return nextStage(); },
 
   /* orders */
   orders() { S.day = dkey(); setView('orders'); },
@@ -1040,8 +1141,8 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'pinin') ACT.pinok();
-  if (e.key === 'Enter' && e.target.id === 'chg') ACT.payCheck();
-  if (e.key === 'Enter' && e.target.id === 'ans') ACT.sumCheck();
+  if (e.key === 'Enter' && e.target.id === 'ans') ACT.ansCheck();
+  if (e.key === 'Enter' && e.target.id === 'xans') ACT.exAnswer();
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'q') { S.q = e.target.value; const g = $('#grid'); if (g) g.innerHTML = storeGrid(); }

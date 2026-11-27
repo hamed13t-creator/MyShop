@@ -1,4 +1,15 @@
 'use strict';
+// Profile levels. Each level switches on a set of features; parents can override single features.
+const LEVELS = ['starter', 'explorer', 'merchant', 'tycoon'];
+const FEATS = ['coupons', 'sum', 'change', 'pct', 'profit', 'profitQ', 'fee', 'exch', 'goal', 'event'];
+const PRESET = {
+  starter: [],
+  explorer: ['coupons', 'sum', 'change'],
+  merchant: ['coupons', 'sum', 'change', 'pct', 'profit'],
+  tycoon: ['coupons', 'sum', 'change', 'pct', 'profit', 'profitQ', 'fee', 'exch', 'goal', 'event']
+};
+const EVENTS = [{ id: 'sale', m: 1.3, e: '🎉' }, { id: 'rain', m: 0.7, e: '🌧️' }, { id: 'holiday', m: 1.5, e: '🎈' }];
+
 // Game catalogs. Prices are in USD (shown in each kid's currency).
 const CATS = [['toys', '🧸'], ['books', '📚'], ['clothes', '👕'], ['food', '🍪'], ['art', '🎨'], ['games', '🎮'], ['other', '✨']];
 const DISCS = [0, 10, 20, 30, 50];

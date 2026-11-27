@@ -9,6 +9,7 @@ Everything is stored on the device (IndexedDB). No accounts, no servers, no real
 - **Items**: photo from camera or gallery, name, price, currency, category, discount (-10% to -50%), quantity. Restock costs cash.
 - **Customers**: create your own (name, mascot, hat, color, personality). Each has a hidden daily budget (never shown as a number, different every day) and a mood face that tells how ready they are to spend.
 - **Storefront**: search, categories, favorites, product pages, **Add to cart**, cart with quantities, coupon codes, checkout.
+- **Four levels** per profile, chosen by the parent when creating it and changeable any time in the Parents panel (PIN): **Starter** (ages 5-7, the app does all the maths, no coupons), **Explorer** (7-9, add up and give change), **Merchant** (9-12, percent coupons, costs and profit), **Tycoon** (12-15, profit questions, delivery fee, currency exchange game, savings goal, daily events). Single features can be switched on or off per kid. The app only suggests a level change; the parent decides.
 - **Shop maths**: the cart hides the total. The kid adds up the prices, then gives the right change. Parents choose per kid: *No math*, *Easy* (sum of items) or *Normal* (total after a coupon). Bonus XP, math stats in the Parents panel.
 - **Cash**: every sale adds the real value of the order to the shop's cash.
 - **Daily sales** (tap the cash pill): revenue, orders, items sold, 7-day chart, and orders with a status flow *Ordered > Packed > Shipped > Delivered*. Delivery brings a star review and sometimes a tip.
@@ -29,7 +30,7 @@ Everything is stored on the device (IndexedDB). No accounts, no servers, no real
 - **iPhone / iPad (Safari):** open the link, tap **Share**, then **Add to Home Screen**.
 
 ## Updating the app
-Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v5`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
+Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v6`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
 
 ## Files
 `index.html`, `style.css`, `app.js` (screens and game logic), `db.js` (storage), `i18n.js` (English and Arabic text), `sfx.js` (sounds), `mascots.js`, `data.js` (catalogs for decor, missions, badges), `sw.js`, `manifest.webmanifest`, and the icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
