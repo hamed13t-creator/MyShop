@@ -30,7 +30,7 @@ Everything is stored on the device (IndexedDB). No accounts, no servers, no real
 - **iPhone / iPad (Safari):** open the link, tap **Share**, then **Add to Home Screen**.
 
 ## Updating the app
-Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v6`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
+Replace the files in the repository. Then change `VERSION` in `sw.js` (for example `myshop-v7`) so phones download the new files. Phones may need the app opened twice to show the new version. Existing profiles, items and orders are kept.
 
 ## Files
 `index.html`, `style.css`, `app.js` (screens and game logic), `db.js` (storage), `i18n.js` (English and Arabic text), `sfx.js` (sounds), `mascots.js`, `data.js` (catalogs for decor, missions, badges), `sw.js`, `manifest.webmanifest`, and the icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).

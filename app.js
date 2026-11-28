@@ -1,12 +1,16 @@
 'use strict';
-/* MyShop v3 - main app. Views are functions returning HTML; clicks are handled with data-act. */
+/* MyShop v5 - main app. Views are functions returning HTML; clicks are handled with data-act. */
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const round2 = v => Math.round(v * 100) / 100;
 /* kids may type Arabic-Indic digits and Arabic separators: turn them into normal numbers */
-const normDigits = s => String(s == null ? '' : s).replace(/[\u0660-\u0669]/g, c => c.charCodeAt(0) - 0x660).replace(/[\u06F0-\u06F9]/g, c => c.charCodeAt(0) - 0x6F0).replace(/[\u066B\u060C,]/g, '.').replace(/[\u066C\s]/g, '');
+const normDigits = s => {
+  let v = String(s == null ? '' : s).replace(/[\u0660-\u0669]/g, c => c.charCodeAt(0) - 0x660).replace(/[\u06F0-\u06F9]/g, c => c.charCodeAt(0) - 0x6F0).replace(/[\u2212\u2013]/g, '-').replace(/\s/g, '');
+  if (/^-?\d{1,3}([,\u066C\u060C]\d{3})+(\.\d+)?$/.test(v)) return v.replace(/[,\u066C\u060C]/g, '');   // 1,500 means fifteen hundred
+  return v.replace(/[\u066B\u060C,]/g, '.').replace(/\u066C/g, '');                                          // 1,5 means one and a half
+};
 const parseNum = s => parseFloat(normDigits(s));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
@@ -113,7 +117,7 @@ const addDays = (k, n) => { const d = new Date(k + 'T12:00:00'); d.setDate(d.get
 const dlabel = (k, o) => new Date(k + 'T12:00:00').toLocaleDateString(S.lang === 'ar' ? 'ar' : 'en', o || { weekday: 'short', month: 'short', day: 'numeric' });
 const catEmoji = c => (CATS.find(x => x[0] === c) || CATS[CATS.length - 1])[1];
 const unitLocal = x => rnd(x.pr * (1 - (x.disc || 0) / 100));
-const imgOrPh = (x, s) => x.img ? '<img src="' + x.img + '" alt="">' : '<div class="ph" style="--h:' + hue(x.id) + '">' + ic('box', s || 34) + '</div>';
+const imgOrPh = (x, s) => x.img ? '<img src="' + esc(x.img) + '" alt="">' : '<div class="ph" style="--h:' + hue(x.id) + '">' + ic('box', s || 34) + '</div>';
 const stars = n => '<span class="stars">' + '★'.repeat(n) + '<i>' + '★'.repeat(5 - n) + '</i></span>';
 
 /* toasts are queued so several messages in a row are all readable */
@@ -179,6 +183,9 @@ function ensureMissions(p) {
     p.ms = { day: d, list: a.slice(0, 3).map(m => ({ id: m.id, prog: 0, claimed: false })) };
   }
   return p.ms;
+}
+function freshMissions(p) {       // today's missions are redrawn if the kid has not started any (so none is impossible at the new level)
+  if (p.ms && p.ms.list.every(m => !m.prog && !m.claimed)) p.ms = null;
 }
 function track(type, n) {
   const ms = ensureMissions(S.cur);
@@ -361,7 +368,7 @@ function goalHtml(p) {
 function itemView() {
   const d = S.idraft, cur = d.cur || S.cur.currency, edit = !!d.id;
   return head(edit ? t('editItem') : t('addItem'), null, 'cancelItem') +
-    '<div class="photo">' + (d.img ? '<img src="' + d.img + '" alt="">' : ic('camera', 44)) + '</div>' +
+    '<div class="photo">' + (d.img ? '<img src="' + esc(d.img) + '" alt="">' : ic('camera', 44)) + '</div>' +
     '<div class="row two"><label class="btn" style="margin:0;color:#fff;font-size:16px"><input type="file" id="fcam" accept="image/*" capture="environment" hidden>' + ic('camera') + ' ' + t('takePhoto') + '</label>' +
     '<label class="btn blue" style="margin:0;color:#fff;font-size:16px"><input type="file" id="fup" accept="image/*" hidden>' + ic('upload') + ' ' + t('upload') + '</label></div>' +
     '<label>' + t('itemName') + '<input id="i_name" class="inp" maxlength="40" value="' + esc(d.name) + '"></label>' +
@@ -800,7 +807,7 @@ const ACT = {
   stayBye() { const d = $('#bye'); if (d) d.remove(); S.exiting = false; rearm(); },
   confirmYes() { const cb = S.cb; S.cb = null; closeSheet(); if (cb) cb(); },
   async install() { if (!deferredInstall) return; deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; render(); },
-  async lang() { S.lang = S.lang === 'en' ? 'ar' : 'en'; await setMeta('lang', S.lang); applyLang(); render(); },
+  async lang() { if (S.view === 'pform') syncDraft(); S.lang = S.lang === 'en' ? 'ar' : 'en'; await setMeta('lang', S.lang); applyLang(); render(); },
   async theme() { S.theme = S.theme === 'dark' ? 'cream' : 'dark'; await setMeta('theme', S.theme); applyTheme(S.theme, ACCENTS[0]); render(); },
   async sound() { S.sound = !S.sound; SFX.on = S.sound; await setMeta('sound', S.sound); if (S.sound) sfx.coin(); render(); },
 
@@ -812,8 +819,14 @@ const ACT = {
   },
   async pinok() {
     const i = $('#pinin'); if (!i) return;
-    if ((await hashPin(normDigits(i.value))) === S.pin) { closeSheet(); const cb = PINCB; PINCB = null; if (cb) cb(); }
-    else { $('#pinerr').textContent = t('wrongPin'); sfx.err(); i.value = ''; i.focus(); }
+    if (Date.now() < S.pinLock) { $('#pinerr').textContent = t('pinWait', { n: Math.ceil((S.pinLock - Date.now()) / 1000) }); sfx.err(); i.value = ''; return; }
+    if ((await hashPin(normDigits(i.value))) === S.pin) { S.pinFails = 0; closeSheet(); const cb = PINCB; PINCB = null; if (cb) cb(); }
+    else {
+      S.pinFails = (S.pinFails || 0) + 1;
+      if (S.pinFails >= 5) { S.pinFails = 0; S.pinLock = Date.now() + 30000; $('#pinerr').textContent = t('pinWait', { n: 30 }); }   // a child cannot guess all 10,000 PINs
+      else $('#pinerr').textContent = t('wrongPin');
+      sfx.err(); i.value = ''; i.focus();
+    }
   },
   parent() { askPin(() => setView('parent')); },
   newProfile() {
@@ -861,7 +874,7 @@ const ACT = {
     toast(t('saved'));
   },
 
-  open(d) { openProfile(d.id); },
+  open(d) { return openProfile(d.id); },
   home() { S.cur = null; S.cart = []; applyTheme(S.theme, ACCENTS[0]); setView('picker'); },
   toShop() { closeSheet(); S.cart = []; S.coupon = null; S.shopper = null; setView('shop'); },
   customize() { S.draft = Object.assign({}, S.cur); S.back = 'shop'; setView('pform'); },
@@ -884,6 +897,7 @@ const ACT = {
     if (old && oldCur !== d.currency) {            // the shop changes currency: convert everything it owns
       for (const x of S.products) { x.pr = Math.max(minUnit(d.currency), conv(x.pr, oldCur, d.currency)); await DB.put('products', x); }
       rec.cash = conv(rec.cash, oldCur, d.currency); rec.st.rev = conv(rec.st.rev, oldCur, d.currency);
+      if (rec.goal) rec.goal.amt = conv(rec.goal.amt, oldCur, d.currency);
       for (const c of S.customers) { c.day = ''; c.budget = null; await DB.put('customers', c); }
     }
     await DB.put('profiles', rec);
@@ -902,7 +916,9 @@ const ACT = {
   },
   exch() { newExchange(); sheet(exchHtml()); focusSoon('#xans'); },
   exAnswer() {
-    const E = S.ex, v = parseNum($('#xans').value);
+    const E = S.ex, xi = $('#xans');
+    if (!xi || E.done) return;
+    const v = parseNum(xi.value);
     if (isNaN(v)) return;
     const p = S.cur, ok = Math.abs(v - E.ans) <= Math.max(minUnit(E.cur), E.ans * 0.01);
     E.tries++;
@@ -916,9 +932,9 @@ const ACT = {
   },
   exNext() { newExchange(); sheet(exchHtml()); focusSoon('#xans'); },
   lvlSheet(d) { sheet(lvlHtml(S.profiles.find(x => x.id === d.id))); },
-  async setLvl(d) { const p = S.profiles.find(x => x.id === d.id); p.lvl = d.v; p.ft = {}; await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
-  async toggleFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = p.ft || {}; p.ft[d.k] = !feat(p, d.k); await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
-  async resetFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = {}; await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
+  async setLvl(d) { const p = S.profiles.find(x => x.id === d.id); p.lvl = d.v; p.ft = {}; freshMissions(p); await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
+  async toggleFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = p.ft || {}; p.ft[d.k] = !feat(p, d.k); freshMissions(p); await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
+  async resetFt(d) { const p = S.profiles.find(x => x.id === d.id); p.ft = {}; freshMissions(p); await DB.put('profiles', p); sheet(lvlHtml(p)); render(); },
   toggleOpen() { S.cur.open = !S.cur.open; saveP(); S.cur.open ? sfx.bell() : sfx.whoosh(); toast(S.cur.open ? t('nowOpen') : t('nowClosed')); render(); },
 
   /* items */
@@ -957,7 +973,7 @@ const ACT = {
     syncItem();
     const d = S.idraft, name = d.name.trim(), price = parseNum(d.price), pr = conv(price, d.cur, curCode());
     if (!name) { toast(t('nameReq')); sfx.err(); return; }
-    if (!(price > 0) || !(pr >= minUnit())) { toast(t('priceReq')); sfx.err(); return; }
+    if (!(price > 0) || !(pr >= minUnit()) || pr > 1e7) { toast(t('priceReq')); sfx.err(); return; }
     const qty = d.id ? d.qty : Math.max(1, Math.min(99, parseInt(normDigits(d.qty), 10) || 1));
     const rec = { id: d.id || uid(), pid: S.cur.id, name, price: pr, cur: curCode(), pr, qty, img: d.img || '', created: d.created || Date.now(), cat: d.cat || 'other', disc: d.disc || 0, fav: !!d.fav };
     await DB.put('products', rec);
@@ -1001,6 +1017,7 @@ const ACT = {
   shopAs(d) {
     if (!S.cur.open) { toast(t('closedMsg')); sfx.err(); return; }
     if (!S.products.length) { toast(t('noItems')); sfx.err(); return; }
+    if (!S.products.some(x => x.qty > 0)) { toast(t('allSold')); sfx.err(); return; }
     const sc = S.customers.find(c => c.id === d.id);
     if (!canShop(sc)) { toast(t('noMoney', { n: sc.name })); sfx.err(); return; }
     S.shopper = sc; S.cart = []; S.coupon = null; S.cpnErr = ''; S.q = ''; S.cat = 'all';
@@ -1064,7 +1081,7 @@ const ACT = {
     if (P.tries >= 2) { P.reveal = true; P.asked++; P.res.push(0); P.err = ''; } else P.err = t('tryAgain');
     sheet(payHtml()); focusSoon('#ans');
   },
-  ansSkip() { const P = S.pay; P.reveal = true; P.asked++; P.res.push(0); sheet(payHtml()); },
+  ansSkip() { const P = S.pay; if (P.reveal) return; P.reveal = true; P.asked++; P.res.push(0); sheet(payHtml()); },
   ansNext() { return nextStage(); },
 
   /* orders */
@@ -1164,12 +1181,17 @@ document.addEventListener('change', async e => {
     f.value = '';
   }
 });
+document.addEventListener('visibilitychange', async () => {   // the app stayed open past midnight: customers get fresh budgets
+  if (document.visibilityState === 'visible' && S.cur && S.customers.some(c => c.day !== dkey())) { await refill(); if (S.view === 'custs' || S.view === 'shop') render(); }
+});
 window.addEventListener('beforeinstallprompt', e => {
   e.preventDefault(); deferredInstall = e;
   if (S.view === 'picker' || S.view === 'parent') render();
 });
 
 async function restoreData(d) {
+  for (const s of ['products', 'customers', 'orders']) if (d[s] != null && !Array.isArray(d[s])) { toast(t('badBackup')); sfx.err(); return; }   // check everything BEFORE erasing anything
+  if (d.profiles.some(p => !p || typeof p.id !== 'string')) { toast(t('badBackup')); sfx.err(); return; }
   for (const s of ['profiles', 'products', 'customers', 'orders']) { await DB.clear(s); await DB.putMany(s, d[s] || []); }
   const m = d.meta || {};
   if (m.pin) await setMeta('pin', m.pin);
